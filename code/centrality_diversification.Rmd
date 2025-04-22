@@ -1,0 +1,394 @@
+---
+title: "Centrality-diversification analysis"
+
+---
+
+
+```{r}
+library(ggplot2)
+library(reshape2)
+library(dplyr)
+library(ggpubr)
+library(igraph)
+library(EnvStats)
+library(aricode)
+library(vegan)
+library(ade4)
+library(ape)
+library(tidyr)
+library(ggraph)
+
+source(here::here("code/functions/functions_simulation.R")) 
+source(here::here("code/functions/function_to_phylo.R"))
+source(here::here("code/functions/function_compute_decomposed_matrices_v3.R"))
+```
+
+
+Parameters for plotting
+
+```{r}
+my.theme<-theme(axis.text=element_text(size=12),
+                axis.title = element_text(size = 14),
+                legend.position = "top",
+                legend.text=element_text(size=10),
+                legend.title = element_text(size=12),
+                plot.title = element_text(face="bold",size=14,margin=margin(0,0,20,0),hjust = 0.5),
+                axis.title.y = element_text(margin = margin(t = 0, r = 15, b = 0, l = 0)),
+                axis.title.x = element_text(margin = margin(t = 15, r = 0, b = 0, l = 0)))
+```
+
+Read data
+
+```{r}
+res_sim <- readRDS(here::here("output/temporary_output/res_sim.rds"))
+```
+
+
+
+```{r}
+result_matrices <- compute_result_matrices(results_simulation = res_sim,
+    		                       int = "foodweb",
+    		                      Smax = 1000,
+    		                      nbasals = 5)
+
+result_matrices$species_life_summary
+```
+
+
+
+# Diversification - centrality
+
+#### get table with diversification rates
+
+```{r}
+# Extract the table
+df <- result_matrices$species_life_summary
+
+# Compute longevity
+df$longevity <- with(df, timestep_extinct - timestep_birth + 1)
+
+# Compute extinction rate: 1 / longevity
+df$extinction_rate <- ifelse(!is.na(df$longevity) & df$longevity > 0,
+                             1 / df$longevity, NA)
+
+# Compute speciation rate: number of descendants / longevity
+df$speciation_rate <- ifelse(!is.na(df$longevity) & df$longevity > 0,
+                             df$n_descendants / df$longevity, NA)
+
+# Compute diversification rate: extinction rate / speciation rate
+df$diversification_rate <- with(df, speciation_rate - extinction_rate)
+
+# Store back into the result object (optional)
+result_matrices$species_life_summary <- df
+
+species_life_summary <- result_matrices$species_life_summary
+
+species_life_summary
+
+```
+
+
+#### get table with centralities
+
+(REMOVING SPP WITH NO INT)
+
+```{r}
+
+
+# Initialize list to store per-timestep centralities
+centrality_data <- list()
+
+# Loop through each timestep's network
+for (i in seq_along(result_matrices$list_net_present_spp.letters)) {
+  mat <- result_matrices$list_net_present_spp.letters[[i]]
+  
+  # Skip tiny or empty matrices
+  if (nrow(mat) < 2 || sum(mat) == 0) next
+  
+  # Convert to igraph object (directed)
+  g <- graph_from_adjacency_matrix(mat, mode = "directed", weighted = NULL)
+  
+  # Get species names
+  sp <- V(g)$name
+  
+  # Calculate centralities
+  degree_cent <- igraph::degree(g, mode = "all")
+  eigen_cent <- tryCatch(eigen_centrality(g, directed = TRUE)$vector, error = function(e) rep(NA, length(sp)))
+  betw_cent <- tryCatch(betweenness(g, directed = TRUE), error = function(e) rep(NA, length(sp)))
+  
+  # Store in data.frame
+  df <- data.frame(
+    spp_letter = sp,
+    timestep = i,
+    degree = degree_cent,
+    eigen = eigen_cent,
+    betweenness = betw_cent,
+    stringsAsFactors = FALSE
+  )
+  
+  # ️Discard species with degree 0 in this timestep
+  df <- df[df$degree > 0, ]
+  
+  centrality_data[[i]] <- df
+}
+
+# Combine all timestep data into one long data.frame
+centrality_long <- do.call(rbind, centrality_data)
+
+# Compute mean centrality per species across all timesteps where it had interactions
+centrality_summary <- aggregate(. ~ spp_letter, 
+                                data = centrality_long[, c("spp_letter", "degree", "eigen", "betweenness")],
+                                FUN = function(x) if(all(is.na(x))) NA else mean(x, na.rm = TRUE))
+
+# Sort
+centrality_summary <- centrality_summary[order(centrality_summary$spp_letter), ]
+
+```
+
+
+
+
+## centrality & diversification
+
+```{r}
+# Merge the species life summary with centrality data
+combined_df <- merge(species_life_summary, centrality_summary, by = "spp_letter", all.x = TRUE)
+
+```
+
+```{r}
+plot_df <- combined_df %>%
+  select(spp_letter, extinction_rate, speciation_rate, diversification_rate,
+         degree, eigen, betweenness) %>%
+  pivot_longer(cols = c(extinction_rate, speciation_rate, diversification_rate),
+               names_to = "rate_type", values_to = "rate_value")
+
+```
+
+```{r}
+# Plot for Degree centrality
+p_degree <- ggplot(plot_df, aes(x = degree, y = rate_value)) +
+  geom_point(alpha = 0.6) +
+  facet_wrap(~rate_type, scales = "free_y") +
+  labs(title = "Degree Centrality vs. Evolutionary Rates",
+       x = "Mean Degree Centrality", y = "Rate") +
+  theme_minimal()
+
+# Plot for Eigenvector centrality
+p_eigen <- ggplot(plot_df, aes(x = eigen, y = rate_value)) +
+  geom_point(alpha = 0.6) +
+  facet_wrap(~rate_type, scales = "free_y") +
+  labs(title = "Eigenvector Centrality vs. Evolutionary Rates",
+       x = "Mean Eigenvector Centrality", y = "Rate") +
+  theme_minimal()
+
+# Plot for Betweenness centrality
+p_betw <- ggplot(plot_df, aes(x = betweenness, y = rate_value)) +
+  geom_point(alpha = 0.6) +
+  facet_wrap(~rate_type, scales = "free_y") +
+  labs(title = "Betweenness Centrality vs. Evolutionary Rates",
+       x = "Mean Betweenness Centrality", y = "Rate") +
+  theme_minimal()
+
+
+
+ggarrange(
+  p_degree,
+  p_eigen,
+  p_betw,
+  ncol = 1,
+  nrow = 3
+)
+```
+
+
+
+## Longevity
+
+```{r}
+
+longevity_df <- combined_df %>%
+  select(spp_letter, longevity, degree, eigen, betweenness) %>%
+  filter(!is.na(longevity) & longevity > 0)
+
+
+# Longevity vs Degree
+p_longevity_degree <- ggplot(longevity_df, aes(x = degree, y = longevity)) +
+  geom_point(alpha = 0.6) +
+  labs(title = "Longevity vs. Degree Centrality",
+       x = "Mean Degree Centrality", y = "Longevity") +
+  theme_minimal()
+
+# Longevity vs Eigen
+p_longevity_eigen <- ggplot(longevity_df, aes(x = eigen, y = longevity)) +
+  geom_point(alpha = 0.6) +
+  labs(title = "Longevity vs. Eigenvector Centrality",
+       x = "Mean Eigenvector Centrality", y = "Longevity") +
+  theme_minimal()
+
+# Longevity vs Betweenness
+p_longevity_betw <- ggplot(longevity_df, aes(x = betweenness, y = longevity)) +
+  geom_point(alpha = 0.6) +
+  labs(title = "Longevity vs. Betweenness Centrality",
+       x = "Mean Betweenness Centrality", y = "Longevity") +
+  theme_minimal()
+
+ggarrange(
+  p_longevity_degree+ geom_smooth(method = "lm", se = FALSE, color = "steelblue"),
+  p_longevity_eigen+ geom_smooth(method = "lm", se = FALSE, color = "steelblue"),
+  p_longevity_betw+ geom_smooth(method = "lm", se = FALSE, color = "steelblue"),
+  ncol = 1,
+  nrow = 3
+)
+
+```
+
+######################
+
+## by temporal windows
+
+```{r}
+presence_matrix <- result_matrices$presence_matrix  # full matrix
+networks_list <- result_matrices$list_net_present_spp.letters
+full_species_life_summary <- result_matrices$species_life_summary
+
+```
+
+
+```{r}
+library(igraph)
+library(dplyr)
+
+
+
+# Extract presence matrix
+presence_matrix <- result_matrices$presence_matrix
+
+# Define time window size
+window_size <- 20
+
+# Compute number of windows (ceiling to handle remainder)
+n_windows <- ceiling(nrow(presence_matrix) / window_size)
+
+# Check output
+n_windows
+
+
+# List to store per-window results
+window_results <- list()
+
+for (w in 1:n_windows) {
+  cat("Processing window", w, "\n")
+  
+  # Define time range for this window
+  t_start <- (w - 1) * window_size + 1
+  t_end <- min(w * window_size, nrow(presence_matrix))
+  window_range <- t_start:t_end
+  
+  ## --------- Compute centralities in this window ----------
+  centrality_data <- list()
+  
+  for (i in window_range) {
+    mat <- networks_list[[i]]
+    if (is.null(mat) || nrow(mat) < 2 || sum(mat) == 0) next
+    
+    g <- graph_from_adjacency_matrix(mat, mode = "directed")
+    sp <- V(g)$name
+    
+    degree_cent <- igraph::degree(g, mode = "all")
+    eigen_cent <- tryCatch(eigen_centrality(g, directed = TRUE)$vector, error = function(e) rep(NA, length(sp)))
+    betw_cent <- tryCatch(betweenness(g, directed = TRUE), error = function(e) rep(NA, length(sp)))
+    
+    df <- data.frame(
+      spp_letter = sp,
+      timestep = i,
+      degree = degree_cent,
+      eigen = eigen_cent,
+      betweenness = betw_cent,
+      stringsAsFactors = FALSE
+    )
+    
+    df <- df[df$degree > 0, ]  # Keep only species with interactions
+    centrality_data[[i]] <- df
+  }
+  
+  centrality_long <- do.call(rbind, centrality_data)
+  centrality_summary <- aggregate(. ~ spp_letter, data = centrality_long[, c("spp_letter", "degree", "eigen", "betweenness")],
+                                  FUN = function(x) if (all(is.na(x))) NA else mean(x, na.rm = TRUE))
+  
+  ## --------- Subset presence matrix to window and compute life metrics ----------
+  pres_sub <- presence_matrix[window_range, , drop = FALSE]
+  spp_letters <- colnames(pres_sub)
+  
+  spp_life <- data.frame(
+    spp_letter = spp_letters,
+    timestep_birth = NA,
+    timestep_extinct = NA,
+    stringsAsFactors = FALSE
+  )
+  
+  for (j in seq_along(spp_letters)) {
+    spp <- spp_letters[j]
+    alive_vec <- pres_sub[, spp]
+    
+    if (any(alive_vec == 1)) {
+      spp_life$timestep_birth[j] <- which(alive_vec == 1)[1]
+      spp_life$timestep_extinct[j] <- tail(which(alive_vec == 1), 1)
+    }
+  }
+  
+  spp_life$longevity <- spp_life$timestep_extinct - spp_life$timestep_birth + 1
+  spp_life <- spp_life[!is.na(spp_life$longevity) & spp_life$longevity > 0, ]
+  
+  # Merge with full descendant counts (can’t restrict to window since descent is irreversible)
+  spp_life$n_descendants <- full_species_life_summary$n_descendants[match(spp_life$spp_letter,
+                                                                           full_species_life_summary$spp_letter)]
+  
+  # Compute rates
+  spp_life$extinction_rate <- 1 / spp_life$longevity
+  spp_life$speciation_rate <- spp_life$n_descendants / spp_life$longevity
+  spp_life$diversification_rate <- spp_life$speciation_rate - spp_life$extinction_rate
+  
+  # Merge with centralities for this window
+  df_combined <- merge(spp_life, centrality_summary, by = "spp_letter", all.x = TRUE)
+  
+  # Store
+  window_results[[paste0("window_", t_start, "_", t_end)]] <- df_combined
+}
+
+```
+
+
+```{r}
+plot_list <- list()
+
+# Choose what to plot
+x_var <- "betweenness"           # or "eigen", "betweenness"
+y_var <- "extinction_rate"  # or "speciation_rate", "diversification_rate", "longevity"
+
+# Loop through time windows and generate a plot for each
+for (win_name in names(window_results)) {
+  df <- window_results[[win_name]]
+  
+  # Filter out NAs just in case
+  df <- df[!is.na(df[[x_var]]) & !is.na(df[[y_var]]), ]
+  
+  if (nrow(df) > 2) {  # Only plot if there are enough points
+    p <- ggplot(df, aes_string(x = x_var, y = y_var)) +
+      geom_point(alpha = 0.6) +
+      geom_smooth(method = "lm", se = FALSE, color = "steelblue") +
+      labs(title = win_name, x = paste("Mean", x_var), y = y_var) +
+      theme_minimal()
+    
+    plot_list[[win_name]] <- p
+  }
+}
+
+
+combined_plot <- ggarrange(plotlist = plot_list, 
+                           ncol = 2, nrow = ceiling(length(plot_list) / 2),
+                           common.legend = TRUE)
+
+combined_plot
+
+```

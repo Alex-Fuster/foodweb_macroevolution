@@ -1,0 +1,111 @@
+---
+title: "Phylosignal analysis - multiple simulations"
+---
+
+
+```{r}
+library(ggplot2)
+library(reshape2)
+library(dplyr)
+library(ggpubr)
+library(igraph)
+library(EnvStats)
+library(aricode)
+library(vegan)
+library(ade4)
+library(ape)
+library(tidyr)
+library(ggraph)
+library(purrr)
+
+
+source(here::here("code/functions/functions_simulation.R")) 
+source(here::here("code/functions/function_to_phylo.R")) 
+source(here::here("code/functions/function_compute_decomposed_matrices.R"))
+```
+
+
+FUNCTION PROCRUSTES SIGNAL
+
+```{r}
+compute_procrustes_signal <- function(res_sim, threshold = 0.8) {
+  sdv_matrices <- compute_result_matrices(results_simulation = res_sim,
+                                          int = "foodweb",
+                                          Smax = 1000,
+                                          nbasals = 5)
+  
+  list_svd_pred <- sdv_matrices$list_svd_pred
+  list_svd_eigen.phy <- sdv_matrices$list_svd_eigen.phy
+  list_network <- sdv_matrices$list_net_present_spp.letters
+  list_corrphylo <- sdv_matrices$list_phylo.corr_cropped
+  
+  timestep <- vector()
+  S <- vector()
+  cor <- vector()
+  d_phylo <- vector()
+  d_network <- vector()
+  
+  for (i in seq_along(list_svd_pred)) {
+    svd_result <- svd(list_network[[i]])
+    singular_values <- svd_result$d
+    cum_var_pred <- cumsum(singular_values^2) / sum(singular_values^2)
+    
+    eigenvalues_phy <- eigen(list_corrphylo[[i]], symmetric = TRUE)$values
+    cum_var_phy <- cumsum(eigenvalues_phy) / sum(eigenvalues_phy)
+    
+    num_axes_pred <- min(which(cum_var_pred >= threshold))
+    num_axes_phy <- min(which(cum_var_phy >= threshold))
+    num_axes_to_keep <- max(num_axes_pred, num_axes_phy)
+    
+    svd_pred_kept <- list_svd_pred[[i]][, 1:num_axes_to_keep, drop = FALSE]
+    svd_phy_kept <- list_svd_eigen.phy[[i]][, 1:num_axes_to_keep, drop = FALSE]
+    
+    proc <- protest(svd_pred_kept, svd_phy_kept)
+    
+    timestep[i] <- i
+    S[i] <- ncol(list_svd_pred[[i]])
+    cor[i] <- proc$t0
+    d_phylo[i] <- num_axes_phy
+    d_network[i] <- num_axes_pred
+  }
+  
+  data.frame(timestep = timestep,
+             S = S,
+             cor = cor,
+             d_phylo = d_phylo,
+             d_network = d_network)
+}
+
+```
+
+
+## compute decomposed matrices for each simulation (and save them)
+
+```{r}
+
+dir.create("decomposed_matrices", showWarnings = FALSE)
+
+files <- list.files("../simulations", full.names = TRUE, pattern = "res_sim_\\d+\\.rds")
+
+for (i in seq_along(files)) {
+  
+  cat("analyzing simulation ", i)
+  
+  res_sim <- readRDS(files[i])
+  
+  sdv_matrices <- compute_decomposed_matrices(
+    results_simulation = res_sim,
+    int = "foodweb",
+    Smax = 1000,
+    nbasals = 5
+  )
+  
+  saveRDS(sdv_matrices, file = file.path("decomposed_matrices", paste0("sdv_matrices_", i, ".rds")))
+}
+
+
+```
+
+
+
+

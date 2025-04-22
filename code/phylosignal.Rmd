@@ -1,0 +1,1115 @@
+---
+title: "Phyogenetic signal analysis"
+---
+
+```{r}
+library(ggplot2)
+library(reshape2)
+library(dplyr)
+library(ggpubr)
+library(igraph)
+library(EnvStats)
+library(aricode)
+library(vegan)
+library(ade4)
+library(ape)
+library(tidyr)
+library(ggraph)
+
+
+source(here::here("code/functions/functions_simulation.R")) 
+source(here::here("code/functions/function_to_phylo.R")) 
+source(here::here("code/functions/function_compute_decomposed_matrices.R"))
+```
+
+
+Read data
+
+```{r}
+res_sim <- readRDS(here::here("output/temporary_output/res_sim.rds"))
+```
+
+
+#### Compute decomposed matrices
+
+The function *compute_decomposed_matrices()* performs Singular Value Decomposition (SVD) on interaction matrices and phylogenetic distance matrices. It saves the egeinvectors of the phylogenetic distance matrix, and the transposed right singular vectors of the interaction matrix (predator roles of species).
+
+
+```{r}
+sdv_matrices <- compute_result_matrices(results_simulation = res_sim,
+    		                       int = "foodweb",
+    		                      Smax = 1000,
+    		                      nbasals = 5)
+
+list_svd_pred <- sdv_matrices$list_svd_pred
+list_svd_eigen.phy <- sdv_matrices$list_svd_eigen.phy
+
+list_network <- sdv_matrices$list_net_present_spp.letters
+list_corrphylo <- sdv_matrices$list_phylo.corr_cropped
+```
+
+
+#### Dimensions retained for the phylogenetic and network matrices
+
+
+Plot the dimensions retained for phylogenetic and network matrices testing different % of variance retained
+
+```{r}
+
+
+thresholds <- c(0.7, 0.8, 0.9)
+df_list <- list()
+
+for (threshold in thresholds) {
+
+  timestep <- vector()
+  d_phylo <- vector()
+  d_network <- vector()
+
+  for (i in seq_along(list_svd_pred)) {
+
+    # Extract singular values from the SVD for the interaction matrix
+    svd_result <- svd(list_network[[i]])
+    singular_values <- svd_result$d
+
+    # Compute cumulative explained variance for the interaction matrix
+    cum_var_pred <- cumsum(singular_values^2) / sum(singular_values^2)
+
+    # Compute cumulative explained variance for the phylogenetic matrix
+    eigenvalues_phy <- eigen(list_corrphylo[[i]], symmetric = TRUE)$values
+    cum_var_phy <- cumsum(eigenvalues_phy) / sum(eigenvalues_phy)
+
+    # Determine the number of axes needed to reach the threshold
+    num_axes_pred <- min(which(cum_var_pred >= threshold))
+    num_axes_phy <- min(which(cum_var_phy >= threshold))
+
+    # Store dimensions retained for both matrices
+    timestep[i] <- i
+    d_network[i] <- num_axes_pred
+    d_phylo[i] <- num_axes_phy
+  }
+
+  # Store results
+  df_temp <- data.frame(
+    timestep = timestep,
+    d_phylo = d_phylo,
+    d_network = d_network,
+    threshold = as.factor(paste0(threshold * 100, "%"))
+  )
+  df_list[[as.character(threshold)]] <- df_temp
+}
+
+# Combine all threshold results
+df_combined <- do.call(rbind, df_list)
+
+# Reshape to long format for plotting
+df_long <- reshape2::melt(df_combined, id.vars = c("timestep", "threshold"),
+                          measure.vars = c("d_phylo", "d_network"),
+                          variable.name = "Dimension_Type",
+                          value.name = "Dimensions")
+
+ggplot(df_long, aes(x = timestep, y = Dimensions, color = threshold, linetype = Dimension_Type)) +
+#  geom_point(alpha = 0.6) + 
+  geom_smooth(se = FALSE, method = "loess", span = 0.3, alpha = 0.8) +  
+  labs(
+    x = "Time step",
+    y = "Number of dimensions retained",
+    color = "Variance threshold",
+    linetype = "Matrix type"
+  ) +
+  theme_classic() +
+  scale_color_manual(values = c("#E41A1C", "#377EB8", "#4DAF4A")) +  
+  scale_linetype_manual(values = c("d_phylo" = "dashed", "d_network" = "solid"))
+
+```
+
+
+
+#### variance explained by different dimensions
+
+
+```{r}
+
+# Initialize storage for variance explained across timesteps
+variance_explained_list_network <- list()
+variance_explained_list_phylo <- list()
+
+for (i in seq_along(list_svd_pred)) {
+  
+  # Extract singular values from the original SVD for the interaction matrix
+  svd_result <- svd(list_network[[i]])
+  singular_values <- svd_result$d
+  
+  # Compute percentage of variance explained by each dimension for network
+  var_explained_network <- (singular_values^2) / sum(singular_values^2) * 100
+
+  # Extract eigenvalues for the phylogenetic matrix
+  eigenvalues_phy <- eigen(list_corrphylo[[i]], symmetric = TRUE)$values
+  var_explained_phylo <- (eigenvalues_phy) / sum(eigenvalues_phy) * 100
+  
+  # Store results in separate dataframes for each matrix type
+  df_network <- data.frame(
+    Dimension = seq_along(var_explained_network),
+    Variance_Explained = var_explained_network,
+    Matrix_Type = "Network"
+  )
+  
+  df_phylo <- data.frame(
+    Dimension = seq_along(var_explained_phylo),
+    Variance_Explained = var_explained_phylo,
+    Matrix_Type = "Phylogeny"
+  )
+
+  # Append to lists
+  variance_explained_list_network[[i]] <- df_network
+  variance_explained_list_phylo[[i]] <- df_phylo
+}
+
+# Combine results across all timesteps for both matrices
+df_variance_explained_network <- do.call(rbind, variance_explained_list_network)
+df_variance_explained_phylo <- do.call(rbind, variance_explained_list_phylo)
+
+# Plot for Network Matrix
+p1 <- ggplot(df_variance_explained_network, aes(x = Variance_Explained)) +
+  geom_histogram(binwidth = 5, fill = "grey", color = "black", alpha = 0.7) +
+  labs(
+    x = "Variance Explained (%)",
+    y = "Frequency",
+    title = "Variance Explained - Network"
+  ) +
+  theme_classic()
+
+# Plot for Phylogenetic Matrix
+p2 <- ggplot(df_variance_explained_phylo, aes(x = Variance_Explained)) +
+  geom_histogram(binwidth = 5, fill = "grey", color = "black", alpha = 0.7) +
+  labs(
+    x = "Variance Explained (%)",
+    y = "Frequency",
+    title = "Variance Explained - Phylogeny"
+  ) +
+  theme_classic()
+
+grid.arrange(p1, p2, ncol = 2)
+
+
+```
+
+
+
+# Method 1 - Procrustes correlation 
+
+
+optimized number of axes
+
+```{r}
+
+timestep <- vector()
+S <- vector()
+cor <- vector()
+d_phylo <- vector()
+d_network <- vector()
+threshold <- 0.8  # Threshold for explained variance (e.g., 80%)
+
+# Loop through each timestep to compute Procrustes correlations
+for (i in seq_along(list_svd_pred)) {
+  
+  # Extract singular values from the original SVD for the interaction matrix
+  svd_result <- svd(list_network[[i]])
+  singular_values <- svd_result$d
+  
+  # Compute cumulative explained variance for the interaction matrix
+  cum_var_pred <- cumsum(singular_values^2) / sum(singular_values^2)
+  
+  # Compute cumulative explained variance for the phylogenetic matrix
+  eigenvalues_phy <- eigen(list_corrphylo[[i]], symmetric = TRUE)$values
+  cum_var_phy <- cumsum(eigenvalues_phy) / sum(eigenvalues_phy)
+  
+  # Determine the number of axes needed to reach the threshold (90% variance)
+  num_axes_pred <- min(which(cum_var_pred >= threshold))
+  num_axes_phy <- min(which(cum_var_phy >= threshold))
+  
+  # Store the number of dimensions retained for each matrix
+  d_network[i] <- num_axes_pred
+  d_phylo[i] <- num_axes_phy
+  
+  # Decide on the number of axes to keep: the maximum of the two
+  num_axes_to_keep <- max(num_axes_pred, num_axes_phy)
+  
+  # Adjust matrices to keep only the necessary axes
+  svd_pred_kept <- list_svd_pred[[i]][, 1:num_axes_to_keep]
+  svd_phy_kept <- list_svd_eigen.phy[[i]][, 1:num_axes_to_keep]
+  
+  # Run Procrustes analysis on the selected axes
+  proc <- protest(svd_pred_kept, svd_phy_kept)
+  
+  # Store results
+  timestep[i] <- i
+  S[i] <- ncol(list_svd_pred[[i]])  # Number of species (community size)
+  cor[i] <- proc$t0
+}
+
+# Store results
+df_results <- data.frame(timestep = timestep, 
+                         S = S, 
+                         cor = cor,
+                         d_phylo = d_phylo,
+                         d_network = d_network)
+
+# Plot the correlation along community size S
+ggplot(df_results, aes(x = timestep, y = cor)) +
+  geom_point(alpha = 0.5) + # Plot points for the correlation
+ # geom_smooth(method = "gam", formula = y ~ s(x)) + # Add GAM smooth line
+  labs(x = "Time steps", y = "Phylogenetic signal") +
+  theme_classic() +
+  ylim(0,1)
+```
+
+
+#### Test if size drives observed Procrustes correlations
+
+
+```{r}
+set.seed(123)  
+
+timestep <- vector()
+S <- vector()
+cor_observed <- vector()
+cor_shuffled <- vector()
+num_permutations <- 5  # Number of shuffling iterations
+threshold <- 0.8  # Threshold for explained variance (80%)
+
+# Loop through each timestep to compute Procrustes correlations
+for (i in seq_along(list_svd_pred)) {
+  
+  # Extract singular values from the original SVD for the interaction matrix
+  svd_result <- svd(list_network[[i]])
+  singular_values <- svd_result$d
+  
+  # Compute cumulative explained variance for the interaction matrix
+  cum_var_pred <- cumsum(singular_values^2) / sum(singular_values^2)
+  
+  # Compute cumulative explained variance for the phylogenetic matrix
+  eigenvalues_phy <- eigen(list_corrphylo[[i]], symmetric = TRUE)$values
+  cum_var_phy <- cumsum(eigenvalues_phy) / sum(eigenvalues_phy)
+  
+  # Determine the number of axes needed to reach the threshold (70% variance)
+  num_axes_pred <- min(which(cum_var_pred >= threshold))
+  num_axes_phy <- min(which(cum_var_phy >= threshold))
+  
+  # Store the number of dimensions retained for each matrix
+  d_network <- num_axes_pred
+  d_phylo <- num_axes_phy
+  
+  # Decide on the number of axes to keep: the maximum of the two
+  num_axes_to_keep <- max(num_axes_pred, num_axes_phy)
+  
+  # Adjust matrices to keep only the necessary axes, ensuring they stay matrices
+  svd_pred_kept <- list_svd_pred[[i]][, 1:num_axes_to_keep, drop = FALSE]
+  svd_phy_kept <- list_svd_eigen.phy[[i]][, 1:num_axes_to_keep, drop = FALSE]
+  
+  # Compute observed Procrustes correlation
+  proc_observed <- protest(svd_pred_kept, svd_phy_kept)
+  
+  # Store observed correlation
+  timestep[i] <- i
+  S[i] <- ncol(list_svd_pred[[i]])  # Number of species (community size)
+  cor_observed[i] <- proc_observed$t0
+  
+  # Generate shuffled correlation values
+  cor_shuffled_replicates <- numeric(num_permutations)
+  
+  for (j in 1:num_permutations) {
+    # Shuffle the phylogenetic matrix **rows**, maintaining its structure
+    shuffled_phy <- svd_phy_kept[sample(nrow(svd_phy_kept)), , drop = FALSE]
+    
+    # Run Procrustes analysis on shuffled data
+    proc_shuffled <- protest(svd_pred_kept, shuffled_phy)
+    cor_shuffled_replicates[j] <- proc_shuffled$t0
+  }
+  
+  # Store the average of shuffled correlations
+  cor_shuffled[i] <- mean(cor_shuffled_replicates)
+}
+
+# Create a dataframe to store results
+df_results <- data.frame(
+  timestep = timestep, 
+  S = S, 
+  cor_observed = cor_observed,
+  cor_shuffled = cor_shuffled
+)
+
+# Plot observed vs shuffled Procrustes correlation over time
+ggplot(df_results, aes(x = timestep)) +
+  geom_point(aes(y = cor_observed, color = "Observed"), alpha = 0.5) + 
+  geom_smooth(aes(y = cor_observed, color = "Observed"), se = FALSE, method = "loess", span = 0.3) +
+  geom_point(aes(y = cor_shuffled, color = "Shuffled"), alpha = 0.5) + 
+  geom_smooth(aes(y = cor_shuffled, color = "Shuffled"), se = FALSE, method = "loess", span = 0.3) +
+  labs(
+    x = "Time Steps", 
+    y = "Procrustes Correlation", 
+    title = "Observed vs. Shuffled Procrustes Correlations"
+  ) +
+  theme_classic() +
+  ylim(0, 1) +
+  scale_color_manual(values = c("Observed" = "blue", "Shuffled" = "red"))
+```
+
+
+
+- convergence to baseline phylosignal (~0.5) could be an artifact of Procrustes.
+
+
+
+# Method 2 - Mantel correlation between network and phylogenetic egeinvectors
+
+
+## 2.2 Manel correlation between optimized axes
+
+
+```{r}
+
+timestep <- vector()
+S <- vector()
+cor <- vector()
+d_phylo <- vector()
+d_network <- vector()
+threshold <- 0.8  # Threshold for explained variance (e.g., 80%)
+
+# Loop through each timestep to compute Procrustes correlations
+for (i in seq_along(list_svd_pred)) {
+
+  # Extract singular values from the original SVD for the interaction matrix
+  svd_result <- svd(list_network[[i]])
+  singular_values <- svd_result$d
+
+  # Compute cumulative explained variance for the interaction matrix
+  cum_var_pred <- cumsum(singular_values^2) / sum(singular_values^2)
+
+  # Compute cumulative explained variance for the phylogenetic matrix
+  eigenvalues_phy <- eigen(list_corrphylo[[i]], symmetric = TRUE)$values
+  cum_var_phy <- cumsum(eigenvalues_phy) / sum(eigenvalues_phy)
+
+  # Determine the number of axes needed to reach the threshold (90% variance)
+  num_axes_pred <- min(which(cum_var_pred >= threshold))
+  num_axes_phy <- min(which(cum_var_phy >= threshold))
+
+  # Store the number of dimensions retained for each matrix
+  d_network[i] <- num_axes_pred
+  d_phylo[i] <- num_axes_phy
+
+  # Decide on the number of axes to keep: the maximum of the two
+  num_axes_to_keep <- max(num_axes_pred, num_axes_phy)
+
+  # Adjust matrices to keep only the necessary axes
+  svd_pred_kept <- list_svd_pred[[i]][, 1:num_axes_to_keep]
+  svd_phy_kept <- list_svd_eigen.phy[[i]][, 1:num_axes_to_keep]
+
+     dist_pred <- dist(svd_pred_kept)
+   dist_phy <- dist(svd_phy_kept)
+
+  # Run Procrustes analysis on the selected axes
+  mantel_result <- mantel(dist_phy, dist_pred, permutations = 999)
+
+   # Store results
+  timestep[i] <- i
+  S[i] <- ncol(list_svd_pred[[i]])  # Number of species (community size)
+  cor[i] <- abs(mantel_result$statistic)  # Mantel correlation coefficient
+}
+
+
+df_results <- data.frame(timestep = timestep,
+                                S = S,
+                                cor_mantel = cor,
+                         d_phylo = d_phylo,
+                         d_network = d_network)
+
+# Plot the Mantel correlation along time steps
+ggplot(df_results, aes(x = timestep, y = cor_mantel)) +
+  geom_point(alpha = 0.5) +
+  geom_smooth(se = FALSE, method = "loess", span = 0.3, alpha = 0.8)+
+  labs(x = "Time Steps", y = "Mantel Correlation") +
+  theme_classic() +
+  ylim(0, 1)
+
+
+```
+
+
+
+Mantel results at different variances kept
+
+```{r}
+
+# Initialize storage lists for different variance thresholds
+thresholds <- c(0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9)
+df_list <- list()
+
+# Loop through different variance thresholds
+for (threshold in thresholds) {
+  
+  # Initialize vectors for results
+  timestep <- vector()
+  d_phylo <- vector()
+  d_network <- vector()
+  cor_mantel <- vector()
+  
+  # Loop through each timestep
+  for (i in seq_along(list_svd_pred)) {
+    
+    # Extract singular values from the SVD for the interaction matrix
+    svd_result <- svd(list_network[[i]])
+    singular_values <- svd_result$d
+    
+    # Compute cumulative explained variance for the interaction matrix
+    cum_var_pred <- cumsum(singular_values^2) / sum(singular_values^2)
+    
+    # Compute cumulative explained variance for the phylogenetic matrix
+    eigenvalues_phy <- eigen(list_corrphylo[[i]], symmetric = TRUE)$values
+    cum_var_phy <- cumsum(eigenvalues_phy) / sum(eigenvalues_phy)
+    
+    # Determine the number of axes needed to reach the threshold
+    num_axes_pred <- min(which(cum_var_pred >= threshold))
+    num_axes_phy <- min(which(cum_var_phy >= threshold))
+    
+    # Store dimensions retained for both matrices
+    d_network[i] <- num_axes_pred
+    d_phylo[i] <- num_axes_phy
+    
+    # Decide on the number of axes to keep (maximum of both)
+    num_axes_to_keep <- max(num_axes_pred, num_axes_phy)
+    
+    # Adjust matrices to keep only the necessary axes
+    svd_pred_kept <- list_svd_pred[[i]][, 1:num_axes_to_keep]
+    svd_phy_kept <- list_svd_eigen.phy[[i]][, 1:num_axes_to_keep]
+    
+    # Compute Euclidean distance matrices
+    dist_pred <- dist(svd_pred_kept)
+    dist_phy <- dist(svd_phy_kept)
+    
+    # Run Mantel test
+    mantel_result <- mantel(dist_phy, dist_pred, permutations = 999)
+    
+    # Store results
+    timestep[i] <- i
+    cor_mantel[i] <- abs(mantel_result$statistic)  # Mantel correlation coefficient
+  }
+  
+  # Store results
+  df_temp <- data.frame(
+    timestep = timestep,
+    d_phylo = d_phylo,
+    d_network = d_network,
+    cor_mantel = cor_mantel,
+    threshold = as.factor(paste0(threshold * 100, "%"))
+  )
+  
+  df_list[[as.character(threshold)]] <- df_temp
+}
+
+# Combine all threshold results
+df_combined <- do.call(rbind, df_list)
+
+# Reshape to long format
+df_long <- melt(df_combined, id.vars = c("timestep", "threshold"),
+                measure.vars = c("d_phylo", "d_network"),
+                variable.name = "Dimension_Type",
+                value.name = "Dimensions")
+
+
+ggplot(df_combined, aes(x = timestep, y = cor_mantel, color = threshold)) +
+  geom_smooth(se = FALSE, method = "loess", span = 0.3, alpha = 0.8) + 
+  labs(
+    x = "Time Steps",
+    y = "Mantel Correlation",
+    color = "Variance Threshold"
+  ) +
+  theme_classic() 
+```
+
+
+
+
+#### Test the effect of network size on Mantel results
+
+
+```{r}
+# Function to shuffle matrix values while keeping the structure
+shuffle_matrix <- function(matrix) {
+  if (nrow(matrix) > 1) {
+    shuffled_values <- sample(as.vector(matrix))  # Shuffle all values
+    shuffled_matrix <- matrix(shuffled_values, nrow = nrow(matrix), ncol = ncol(matrix))
+    return(shuffled_matrix)
+  } else {
+    return(matrix)  # If only one row, return unchanged
+  }
+}
+
+# Initialize vectors to store results
+timestep <- vector()
+S <- vector()
+cor_mantel_original <- vector()
+cor_mantel_shuffled <- vector()
+num_permutations <- 5  # Number of shuffling iterations
+threshold <- 0.9  # Threshold for explained variance
+
+# Loop through each timestep to compute Mantel correlations
+for (i in seq_along(list_svd_pred)) {
+  
+  # Extract singular values from the original SVD for the interaction matrix
+  svd_result <- svd(list_network[[i]])
+  singular_values <- svd_result$d
+
+  # Compute cumulative explained variance for the interaction matrix
+  cum_var_pred <- cumsum(singular_values^2) / sum(singular_values^2)
+
+  # Compute cumulative explained variance for the phylogenetic matrix
+  eigenvalues_phy <- eigen(list_corrphylo[[i]], symmetric = TRUE)$values
+  cum_var_phy <- cumsum(eigenvalues_phy) / sum(eigenvalues_phy)
+
+  # Determine the number of axes needed to reach the threshold
+  num_axes_pred <- ifelse(any(cum_var_pred >= threshold), min(which(cum_var_pred >= threshold)), length(cum_var_pred))
+  num_axes_phy <- ifelse(any(cum_var_phy >= threshold), min(which(cum_var_phy >= threshold)), length(cum_var_phy))
+
+  # Store the number of dimensions retained for each matrix
+  d_network <- num_axes_pred
+  d_phylo <- num_axes_phy
+
+  # Decide on the number of axes to keep: the maximum of the two
+  num_axes_to_keep <- max(num_axes_pred, num_axes_phy)
+
+  # Adjust matrices to keep only the necessary axes
+  svd_pred_kept <- list_svd_pred[[i]][, 1:num_axes_to_keep, drop = FALSE]
+  svd_phy_kept <- list_svd_eigen.phy[[i]][, 1:num_axes_to_keep, drop = FALSE]
+
+  # Ensure matrices have more than one row/column
+  if (nrow(svd_pred_kept) < 2 || nrow(svd_phy_kept) < 2) next
+
+  # Compute distance matrices
+  dist_pred <- dist(svd_pred_kept)
+  dist_phy <- dist(svd_phy_kept)
+
+  # Run Mantel test for original matrices
+  mantel_result_orig <- mantel(dist_phy, dist_pred, permutations = 999)
+
+  # Generate shuffled correlation values
+  cor_shuffled_replicates <- numeric(num_permutations)
+
+  for (j in 1:num_permutations) {
+    # Shuffle phylogenetic matrix rows randomly only if more than one row exists
+    if (nrow(svd_phy_kept) > 1) {
+      shuffled_phy <- svd_phy_kept[sample(nrow(svd_phy_kept)), , drop = FALSE]
+    } else {
+      shuffled_phy <- svd_phy_kept  # If only one row, keep unchanged
+    }
+    
+    # Compute distance for shuffled matrices
+    dist_pred_shuffled <- dist(svd_pred_kept)
+    dist_phy_shuffled <- dist(shuffled_phy)
+    
+    # Run Mantel test on shuffled data
+    mantel_result_shuffled <- mantel(dist_phy_shuffled, dist_pred_shuffled, permutations = 999)
+    cor_shuffled_replicates[j] <- abs(mantel_result_shuffled$statistic)
+  }
+
+  # Store results
+  timestep[i] <- i
+  S[i] <- ncol(list_svd_pred[[i]])  # Number of species (community size)
+  cor_mantel_original[i] <- abs(mantel_result_orig$statistic)
+  cor_mantel_shuffled[i] <- mean(cor_shuffled_replicates)  # Average shuffled correlation
+}
+
+# Create a dataframe to store results
+df_mantel_results <- data.frame(
+  timestep = timestep, 
+  S = S, 
+  cor_mantel_original = cor_mantel_original,
+  cor_mantel_shuffled = cor_mantel_shuffled
+)
+
+# Mantel correlation over time for original vs shuffled matrices
+ggplot(df_mantel_results, aes(x = timestep)) +
+  geom_point(aes(y = cor_mantel_original, color = "Original"), alpha = 0.5) +
+  geom_smooth(aes(y = cor_mantel_original, color = "Original"), method = "loess", span = 0.3, se = FALSE) +
+  geom_point(aes(y = cor_mantel_shuffled, color = "Shuffled"), alpha = 0.5) +
+  geom_smooth(aes(y = cor_mantel_shuffled, color = "Shuffled"), method = "loess", span = 0.3, se = FALSE) +
+  labs(x = "Time Steps", y = "Mantel Correlation", color = "Matrix Type") +
+  theme_classic() +
+  ylim(0, 1) +
+  theme(legend.position = "top")
+```
+
+
+
+
+
+# Method 3 - compare clusters
+
+
+## getting clusters directly from the tree
+
+
+```{r}
+spectral_clustering_tree <- function(tree, nb_cluster, normalized=FALSE, correlation = TRUE) {  
+  # Ensure non-zero branch lengths
+  tree.corr <- tree
+  tree.corr$edge.length <- sapply(tree.corr$edge.length, function(x) ifelse(x == 0, 1e-5, x))
+  
+  # Compute variance-covariance matrix
+  tree.vcv <- vcv(tree.corr, corr = correlation)
+  diag(tree.vcv) <- 0  # Remove self-similarities
+  
+  # Compute Laplacian matrix
+  if (normalized) {
+    L <- diag(rep(1, dim(tree.vcv)[1])) - diag(1 / rowSums(tree.vcv)) %*% tree.vcv
+  } else {
+    L <- diag(rowSums(tree.vcv)) - tree.vcv
+  }
+
+  ## Generates indices of last (smallest) K vectors
+	selected <- rev(1:ncol(L))[1:nb_cluster] 
+	## Extract n normalized eigen-vectors
+	U <- eigen(L)$vectors[, selected, drop = FALSE]  # spectral decomposition
+	U <- sweep(U, 1, sqrt(rowSums(U^2)), '/')    
+	## Perform k-means
+	res <- kmeans(U, nb_cluster, nstart = 40)$cl
+	
+	res
+}
+
+```
+
+
+```{r}
+laplacian_spectral_gap_tree <- function(tree, normalized = FALSE, correlation = TRUE) {
+  # Ensure non-zero branch lengths
+  tree.corr <- tree
+  tree.corr$edge.length <- sapply(tree.corr$edge.length, function(x) ifelse(x == 0, 1e-5, x))
+  
+  # Compute variance-covariance matrix
+  tree.vcv <- vcv(tree.corr, corr = correlation)
+  diag(tree.vcv) <- 0  # Remove self-similarities
+
+  # Compute Laplacian matrix
+  if (normalized) {
+    L <- diag(rep(1, dim(tree.vcv)[1])) - diag(1 / rowSums(tree.vcv)) %*% tree.vcv
+  } else {
+    L <- diag(apply(tree.vcv,1,sum))-tree.vcv
+  }
+
+  # Compute eigenvalues
+  lambdas <- sort(eigen(L)$values)
+  comps <- length(which(lambdas < 1e-12))
+  l <- length(lambdas)
+  
+  # Compute spectral gaps
+  s_gaps <- lambdas[-1] - lambdas[-l]
+  s_util <- s_gaps[-(1:comps)]
+  s_util <- s_util[1:round(l / 4)] #s_util[1:round(l / 2)]
+  opt_n <- which.max(s_util) + comps
+
+  # Plot eigenvalues & spectral gaps
+  # par(mfrow = c(2, 1))
+  # plot(lambdas, xlab = "", ylab = "Lambda", type = "l")
+  # plot(s_gaps, xlab = "", ylab = "Spectral Gap", type = "l")
+
+  return(list("spectral_gaps" = s_gaps, "optim_n" = opt_n))
+}
+
+```
+
+
+```{r}
+compute_optimal_cluster_metrics_tree <- function(results_simulation, Smax, nbasals) {
+  
+  presence_matrix <- results_simulation$presence_matrix
+  n_steps <- length(results_simulation$network_list)
+
+  # Identify valid timesteps
+  non.valid_timesteps_phylo_distance <- which(rowSums(presence_matrix) < 3)
+  final.discarded_timestep <- ifelse(length(non.valid_timesteps_phylo_distance) > 0, 
+                                     max(non.valid_timesteps_phylo_distance) + 1, 1)
+  
+  list_anc_dist <- results_simulation$list_anc_dist[(final.discarded_timestep + 1):n_steps]
+  network_list <- results_simulation$network_list[(final.discarded_timestep + 1):n_steps]
+  
+  # Convert species names to letters
+  list_anc_dist_letters <- lapply(list_anc_dist, change_sppnames_letters_ancdist.table)
+  list_networks_sppnames_numbers <- lapply(network_list, set_sppNames_numbers)
+  list_networks_sppnames_letters <- lapply(list_networks_sppnames_numbers, convert_sppnames_toletters)
+
+  colnames(presence_matrix) <- seq(1:Smax)
+  colnames(presence_matrix) <- chartr("0123456789", "ABCDEFGHIJ", colnames(presence_matrix))
+  presence_matrix <- presence_matrix[(final.discarded_timestep + 1):n_steps, ]
+
+  # Store results
+  skipped_timesteps <- c()  
+  original_trees <- list()
+  pruned_trees <- list()
+  phylo_clusters_list <- list()
+  num_clusters_list <- numeric(length(list_anc_dist_letters))
+  ari_values <- numeric(length(list_anc_dist_letters))
+  nmi_values <- numeric(length(list_anc_dist_letters))
+
+  for (i in seq_along(list_anc_dist_letters)) {
+    
+    cat("Processing timestep:", i, "\n")
+
+    # Process phylogenetic tree
+    newick <- ToPhylo2(list_anc_dist_letters[[i]])
+    newick_tail <- paste(newick, "root")
+    tree <- read.tree(text = sub("A root",";", newick_tail))
+    tree$edge.length <- sapply(tree$edge.length, function(x) ifelse(x == 0, 1e-5, x))
+
+    # Save full tree before pruning
+    original_trees[[i]] <- tree
+
+    # Get alive species
+    alive_species <- colnames(presence_matrix)[which(presence_matrix[i, ] == 1)]
+    alive_species_filtered <- intersect(alive_species, tree$tip.label)
+
+    # Check for unmatched species
+    dropped_species <- setdiff(alive_species, tree$tip.label)
+    if (length(dropped_species) > 0) {
+      warning("Some species in alive_species are not in the tree at timestep ", i, ": ", paste(dropped_species, collapse = ", "))
+    }
+
+    # Prune the tree only using the filtered species
+    pruned_tree <- keep.tip(tree, alive_species_filtered)
+    pruned_trees[[i]] <- pruned_tree
+
+    # Compute optimal number of clusters using spectral gap
+    optim_n <- laplacian_spectral_gap_tree(pruned_tree)$optim_n
+
+    # Handle cases where `optim_n` is invalid
+    if (is.null(optim_n) || length(optim_n) == 0 || is.na(optim_n) || optim_n < 2) {
+      warning("Skipping timestep ", i, " due to invalid optim_n value: ", optim_n)
+      skipped_timesteps <- c(skipped_timesteps, i)
+      num_clusters_list[i] <- NA
+      ari_values[i] <- NA
+      nmi_values[i] <- NA
+      next  # Skip this timestep
+    }
+
+    # Apply spectral clustering on the pruned tree
+    phylo_clusters <- spectral_clustering_tree(pruned_tree, optim_n)
+    num_clusters_list[i] <- length(unique(phylo_clusters))
+
+    # Assign cluster labels to species
+    names(phylo_clusters) <- pruned_tree$tip.label
+    phylo_clusters_list[[i]] <- phylo_clusters
+
+    # **Clustering the Interaction Matrix (SBM)**
+    interaction_matrix <- list_networks_sppnames_letters[[i]][alive_species_filtered, alive_species_filtered]
+    diag(interaction_matrix) <- 0  
+
+    if (sum(interaction_matrix) == 0) {
+      cat("Sparse or empty interaction matrix at timestep:", i, "- Assigning all species to one cluster.\n")
+      interaction_clusters <- rep(1, length(alive_species_filtered))
+    } else {
+      sbm_fit <- sbm::estimateSimpleSBM(interaction_matrix, model = "bernoulli")
+      interaction_clusters <- sbm_fit$memberships
+    }
+
+    # Compute ARI and NMI
+    ari_values[i] <- compare(interaction_clusters, phylo_clusters, method = "adjusted.rand")
+    nmi_values[i] <- compare(interaction_clusters, phylo_clusters, method = "nmi")
+  }
+
+  return(list(
+    results = data.frame(
+      timestep = 1:length(num_clusters_list),
+      num_clusters = num_clusters_list,
+      ARI = ari_values,
+      NMI = nmi_values
+    ),
+    original_trees = original_trees,
+    pruned_trees = pruned_trees,
+    clusters = phylo_clusters_list,
+    skipped_timesteps = skipped_timesteps  
+  ))
+}
+
+
+
+```
+
+
+```{r, echo=FALSE, results="hide", message=FALSE, warning=FALSE}
+phylo_output <- invisible(compute_optimal_cluster_metrics_tree(results_simulation = res_sim, Smax = 1000, nbasals = 5))
+```
+
+Is the clustering on the phylogeny working well?
+
+
+```{r}
+
+plot_phylo_clusters_at_timestep <- function(phylo_output, timestep) {
+  
+  # Extract pruned tree and clustering results
+  tree <- phylo_output$pruned_trees[[timestep]]
+  phylo_clusters <- phylo_output$clusters[[timestep]]
+  
+  # Ensure species names are properly mapped
+  species_names <- names(phylo_clusters)  # Extract species names from clusters
+  tree_species <- tree$tip.label          # Extract species names from the pruned tree
+  
+  # *Check which species in the tree are also in the cluster assignments**
+  common_species <- intersect(tree_species, species_names)
+
+  # If no common species exist, print a warning and return
+  if (length(common_species) == 0) {
+    warning("No matching species found between tree and phylo_clusters at timestep", timestep)
+    return(NULL)
+  }
+
+  # **Subset the clustering results to match only species that exist in the tree**
+  matched_clusters <- phylo_clusters[common_species]
+
+  # *Map cluster IDs to the correct tree nodes**
+  cluster_data <- data.frame(label = common_species, cluster = as.factor(matched_clusters))
+
+  # *Remove unused cluster levels to avoid extra legend categories**
+  cluster_data$cluster <- droplevels(cluster_data$cluster)
+
+  #*Ensure colors match the actual number of clusters**
+  unique_clusters <- unique(cluster_data$cluster)
+  num_clusters <- length(unique_clusters)
+  cluster_colors <- scales::hue_pal()(num_clusters)  # Automatically generate distinct colors
+
+  # *Plot the tree and color nodes based on their clusters**
+  ggtree(tree) %<+% cluster_data +  # Attach cluster data to tree
+    geom_tippoint(aes(color = cluster), size = 3) +
+    scale_color_manual(values = cluster_colors) +  # Use correct number of colors
+    theme_minimal() +
+    labs(title = paste("Phylogenetic Clusters at Timestep", timestep),
+         color = "Cluster")
+}
+```
+
+
+
+```{r}
+plot_phylo_clusters_at_timestep(phylo_output, timestep = 65)
+```
+
+
+
+
+n clusters with time
+
+```{r}
+ggplot(phylo_output$results, aes(x = timestep, y = num_clusters)) +
+  geom_point(color = "black", alpha = 0.7, size = 3) +
+  geom_smooth(se = FALSE, method = "gam", span = 0.3, alpha = 0.8, color = "black") +
+  labs(
+    x = "Time Step", 
+    y = "Number of Clusters", 
+    title = "Detected Number of Clusters Over Time"
+  ) +
+  theme_minimal()+
+  ylim(0,max(phylo_output$results$num_clusters)+2)
+
+```
+
+Correlation interaction - phylogeny clusters
+
+```{r}
+filtered_results <- phylo_output$results %>%
+  filter(abs(ARI) > 1e-10, abs(NMI) > 1e-10)
+
+ggplot(filtered_results, aes(x = timestep)) +
+  geom_point(aes(y = ARI), color = 'blue', alpha = 0.7, size = 3) +
+  geom_smooth(aes(y = ARI), se = FALSE, method = "gam", span = 0.3, alpha = 0.8, color = "blue") +
+  geom_point(aes(y = NMI), color = 'red', alpha = 0.7, size = 3) +
+  geom_smooth(aes(y = NMI), se = FALSE, method = "gam", span = 0.3, alpha = 0.8, color = "red") +
+  labs(
+    x = "Time Step", 
+    y = "Clustering Metrics", 
+    title = "ARI and NMI Over Time"
+  ) +
+  theme_minimal() +
+ # scale_y_continuous(limits = c(0, 1), name = "Metric Value") +
+  scale_x_continuous(name = "Time Step") +
+  theme(legend.position = "right")
+
+
+```
+
+
+# Jaccard + phylo cov
+
+```{r}
+library(vegan)   # For vegdist (Jaccard)
+library(ape)     # For cophenetic distances
+library(ggplot2)
+
+compute_jaccard_phylo_correlation <- function(list_network, list_corrphylo) {
+  
+  correlations <- data.frame(
+    timestep = seq_along(list_network),
+    predator = NA_real_,
+    prey = NA_real_,
+    both = NA_real_
+  )
+  
+  for (i in seq_along(list_network)) {
+    interaction_matrix <- list_network[[i]]
+    phylo_corr <- list_corrphylo[[i]]
+    
+    # Ensure species names match
+    common_species <- intersect(rownames(interaction_matrix), rownames(phylo_corr))
+    
+    if (length(common_species) < 3) next  # Skip short cases
+    
+    interaction_matrix <- interaction_matrix[common_species, common_species]
+    phylo_corr <- phylo_corr[common_species, common_species]
+    
+    
+        # Prey perspective: columns = predator
+    jaccard_pred <- 1 - as.matrix(vegdist(t(interaction_matrix), method = "jaccard", binary = TRUE))
+    
+    # Predator perspective: rows = prey
+    jaccard_prey <- 1 - as.matrix(vegdist(interaction_matrix, method = "jaccard", binary = TRUE))
+    
+
+    
+    # Both: concatenate rows and cols
+    combined <- cbind(interaction_matrix, t(interaction_matrix))
+    jaccard_both <- 1 - as.matrix(vegdist(combined, method = "jaccard", binary = TRUE))
+    
+    # Flatten matrices and compute Mantel-like Pearson correlation
+    upper_tri <- function(mat) mat[upper.tri(mat)]
+    
+    correlations$predator[i] <- cor(upper_tri(jaccard_pred), upper_tri(phylo_corr), use = "complete.obs")
+    correlations$prey[i]     <- cor(upper_tri(jaccard_prey), upper_tri(phylo_corr), use = "complete.obs")
+    correlations$both[i]     <- cor(upper_tri(jaccard_both), upper_tri(phylo_corr), use = "complete.obs")
+  }
+  
+  return(correlations)
+}
+
+```
+
+```{r}
+cor_jaccard_phylo <- compute_jaccard_phylo_correlation(list_network, list_corrphylo)
+
+```
+
+```{r}
+cor_long <- tidyr::pivot_longer(cor_jaccard_phylo, cols = c(predator, prey, both),
+                                names_to = "type", values_to = "correlation")
+
+ggplot(cor_long, aes(x = timestep, y = abs(correlation), color = type)) +
+  geom_point(alpha = 0.7) +
+  geom_smooth(se = FALSE, method = "lm") +
+  labs(title = "Correlation Between Jaccard and Phylogenetic Matrices",
+       x = "Timestep", y = "Pearson correlation", color = "Interaction view") +
+  theme_minimal()
+
+```
+
+## Ramdomization test
+
+```{r}
+library(vegan)
+library(ape)
+library(ggplot2)
+
+# Helper to shuffle binary matrix while preserving shape
+shuffle_binary_matrix <- function(mat) {
+  flat <- as.vector(mat)
+  shuffled <- sample(flat)
+  matrix(shuffled, nrow = nrow(mat), ncol = ncol(mat))
+}
+
+# Main function to compare original vs shuffled Jaccard correlations
+compare_jaccard_phylo_randomized <- function(list_network, list_corrphylo, num_permutations = 10) {
+  
+  # Prepare results
+  correlations <- data.frame(
+    timestep = seq_along(list_network),
+    predator = NA_real_,
+    prey = NA_real_,
+    both = NA_real_,
+    predator_shuffled = NA_real_,
+    prey_shuffled = NA_real_,
+    both_shuffled = NA_real_
+  )
+  
+  for (i in seq_along(list_network)) {
+    cat("Processing timestep", i, "\n")
+    interaction_matrix <- list_network[[i]]
+    phylo_corr <- list_corrphylo[[i]]
+    
+    common_species <- intersect(rownames(interaction_matrix), rownames(phylo_corr))
+    if (length(common_species) < 3) next
+    
+    interaction_matrix <- interaction_matrix[common_species, common_species]
+    phylo_corr <- phylo_corr[common_species, common_species]
+    
+    # Original Jaccard matrices
+    jacc_pred <- 1 - as.matrix(vegdist(t(interaction_matrix), method = "jaccard", binary = TRUE))
+    jacc_prey <- 1 - as.matrix(vegdist(interaction_matrix, method = "jaccard", binary = TRUE))
+    combined <- cbind(interaction_matrix, t(interaction_matrix))
+    jacc_both <- 1 - as.matrix(vegdist(combined, method = "jaccard", binary = TRUE))
+    
+    # Flatten for Pearson
+    upper_tri <- function(mat) mat[upper.tri(mat)]
+    
+    # Original correlations
+    correlations$predator[i] <- cor(upper_tri(jacc_pred), upper_tri(phylo_corr), use = "complete.obs")
+    correlations$prey[i] <- cor(upper_tri(jacc_prey), upper_tri(phylo_corr), use = "complete.obs")
+    correlations$both[i] <- cor(upper_tri(jacc_both), upper_tri(phylo_corr), use = "complete.obs")
+    
+    # Randomized correlations
+    pred_rands <- prey_rands <- both_rands <- numeric(num_permutations)
+    
+    for (j in 1:num_permutations) {
+      shuffled_matrix <- shuffle_binary_matrix(interaction_matrix)
+      jacc_pred_rand <- 1 - as.matrix(vegdist(t(shuffled_matrix), method = "jaccard", binary = TRUE))
+      jacc_prey_rand <- 1 - as.matrix(vegdist(shuffled_matrix, method = "jaccard", binary = TRUE))
+      combined_rand <- cbind(shuffled_matrix, t(shuffled_matrix))
+      jacc_both_rand <- 1 - as.matrix(vegdist(combined_rand, method = "jaccard", binary = TRUE))
+      
+      pred_rands[j] <- cor(upper_tri(jacc_pred_rand), upper_tri(phylo_corr), use = "complete.obs")
+      prey_rands[j] <- cor(upper_tri(jacc_prey_rand), upper_tri(phylo_corr), use = "complete.obs")
+      both_rands[j] <- cor(upper_tri(jacc_both_rand), upper_tri(phylo_corr), use = "complete.obs")
+    }
+    
+    # Store means
+    correlations$predator_shuffled[i] <- mean(abs(pred_rands), na.rm = TRUE)
+    correlations$prey_shuffled[i] <- mean(abs(prey_rands), na.rm = TRUE)
+    correlations$both_shuffled[i] <- mean(abs(both_rands), na.rm = TRUE)
+  }
+  
+  return(correlations)
+}
+
+```
+
+```{r}
+cor_jacc_rand <- compare_jaccard_phylo_randomized(list_network, list_corrphylo, num_permutations = 10)
+
+# Reshape for plotting
+library(tidyr)
+cor_long_rand <- pivot_longer(cor_jacc_rand,
+  cols = c(predator, prey, both, predator_shuffled, prey_shuffled, both_shuffled),
+  names_to = "type", values_to = "correlation"
+)
+
+cor_long_rand$type <- factor(cor_long_rand$type, 
+  levels = c("predator", "predator_shuffled", "prey", "prey_shuffled", "both", "both_shuffled"),
+  labels = c("Predator", "Predator (Shuffled)", "Prey", "Prey (Shuffled)", "Both", "Both (Shuffled)")
+)
+
+ggplot(cor_long_rand, aes(x = timestep, y = abs(correlation), color = type)) +
+  geom_point(alpha = 0.6) +
+  geom_smooth(method = "loess", se = FALSE, span = 0.3) +
+  labs(title = "Original vs Shuffled Jaccard–Phylogenetic Correlation",
+       x = "Timestep", y = "Abs(Pearson correlation)",
+       color = "Matrix View") +
+  theme_minimal()
+
+```
+

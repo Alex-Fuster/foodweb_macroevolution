@@ -1,0 +1,1106 @@
+---
+title: "test"
+---
+
+
+```{r}
+library(ggplot2)
+library(reshape2)
+library(dplyr)
+library(ggpubr)
+library(igraph)
+library(EnvStats)
+library(aricode)
+library(vegan)
+library(ade4)
+library(ape)
+library(tidyr)
+library(ggraph)
+
+source(here::here("code/functions/functions_simulation.R")) 
+source(here::here("code/functions/function_compute_df_phylosignal.R"))
+#source(here::here("code/functions/function_compute_df_centr_longevity.R"))
+source(here::here("code/functions/functions_simulation_inspection.R"))
+#source(here::here("code/functions/functions_simulation_bif_fw_beta_probn.R"))
+source(here::here("code/functions/functions_simulation_optimized.R"))
+source(here::here("code/functions/function_compute_phylosignal_1sim_20feb25.R"))
+
+```
+
+
+Parameters for plotting
+
+```{r}
+my.theme<-theme(axis.text=element_text(size=12),
+                axis.title = element_text(size = 14),
+                legend.position = "top",
+                legend.text=element_text(size=10),
+                legend.title = element_text(size=12),
+                plot.title = element_text(face="bold",size=14,margin=margin(0,0,20,0),hjust = 0.5),
+                axis.title.y = element_text(margin = margin(t = 0, r = 15, b = 0, l = 0)),
+                axis.title.x = element_text(margin = margin(t = 15, r = 0, b = 0, l = 0)))
+```
+
+
+
+
+## Parameters foodweb
+
+```{r}
+pars = list()
+
+pars$competition_coefficient = 0.025
+pars$Sbasal = 5 # number of basal species
+pars$Smax = 1000 # Maximal number of species allowed
+#pars$Bspe = 4 # Basal species impact on the speciation probality
+#pars$Bext = 4 # Basal species impact on extinction probability
+pars$av_r = 0.18#0.185 # 0.2 range of the niche
+pars$sd = 0.5*pars$av_r + 0.0001 # Standard deviation of the normal distribution used to calculate the niche optimum trait of a new species
+#pars$sd = 0.5*pars$av_r + 0.0001 # Standard deviation of the normal distribution used to calculate the niche optimum trait of a new species
+
+# PROBABILITY OF MUTATION
+
+pars$u_max = 0.23#0.15 #0.15 # mutation probability (0.075, )
+pars$d = 0.5 # Decrease speed of the establishment probability
+pars$I_max = 60 # Maximal number of interactioning species
+pars$beta_n =  1 # parameter of the beta distribution 
+
+# STRENGTH OF NEUTRAL-DRIVEN EVOLUTION
+
+pars$SN = 0 # strength for neutral-driven evolution
+
+# PROBABILITY OF ESTABLISHMENT
+
+# strength of selection-driven selection is 1 - SN
+pars$estab_prob_neutral = 0.5 # neutral probability of establishment
+
+# Facilitation & Foodweb
+
+pars$u_0pos = 1  
+pars$u_1pos = -1 
+pars$a_upos = 0.45 
+
+# PROBABILITY OF EXTINCTION
+
+pars$ext_prob_neutral = rep(0.0005, pars$Smax) # neutral probability of extinction
+
+# Competition
+
+pars$e_0neg = 0.1 #0.15 # Asymptotic extinction probability with infinite negative interactions
+pars$a_eneg = 0.025 # Shape of the exponential decay of the negative extinction - interaction relationship
+pars$e_1neg = -pars$e_0neg  # Extinction probability with absence of interactions
+
+# Facilitation & Foodweb
+
+pars$e_0pos = 0.075 
+pars$e_1pos = 5.19 
+pars$a_epos = 1.2 
+
+
+#########################################
+
+# Logistic function parameters
+pars$k <- 10  # Steepness of the logistic curve
+pars$midpoint <- 0.5  # Midpoint for the logistic curve
+
+```
+
+
+# parameters simulation
+
+```{r}
+nsteps =  150
+nsim = 1
+
+```
+
+
+
+
+--------------------------
+beta_ext * 0.097 + (1 - beta_ext) * avg_similarity
+
+# New pars based on testing (13 sept)
+
+```{r}
+pars$u_0pos <- 0.4   # Baseline probability
+pars$u_1pos <- 0.7  # Scaling factor
+pars$a_upos <- 0.2   # Shape of the exponential increase
+
+pars$e_0neg <- 0.01   # Baseline probability
+pars$e_1neg <- 0.05 #0.5 # Scaling factor for out-degree
+pars$a_eneg <- 0.2 #0.2  Shape of the exponential increase
+
+pars$beta_ext <- 0.8 # Control strength between out-degree and similarity
+
+pars$competition_coefficient <- 0.01 #0.1 #0.1 #0.06
+
+pars$multiplier = 0.9 #1
+
+```
+
+```{r}
+pars$beta_n =  50#50
+```
+
+
+Top predators with:
+
+
+```{r}
+pars$av_r = 0.17 #0.16
+pars$beta_ext <- 0.8 # Control strength between out-degree and similarity
+pars$competition_coefficient <- 0.0085#0.0085 #0.0025 #0.1 #0.1 #0.06
+pars$multiplier = 1 # or also 0.8
+```
+
+
+
+
+### Simulation
+
+
+```{r}
+
+list_res <- list()
+seed_list <- NULL
+seed_record <- rep(NA, nsim)
+successful_sim <- 0
+total_nb_sim <- 0
+
+while (successful_sim < nsim) {
+  seed <- sample.int(80000, 1)
+  if (seed %in% seed_list) next
+  seed_list <- c(seed_list, seed)
+  
+  cat("Trying seed:", seed, "\n")
+  simulation <- sim_model(seed = seed, pars = pars, nsteps = nsteps)
+  
+  # ❌ If simulation failed (returned NULL), skip this iteration
+  if (is.null(simulation)) {
+    cat("❌ Simulation discarded (didn't meet criteria).\n")
+    next
+  }
+  
+  # ✅ Only store if simulation passed all criteria
+  successful_sim <- successful_sim + 1
+  total_nb_sim <- total_nb_sim + 1
+  seed_record[successful_sim] <- seed
+  
+  res_sim <- list(
+    simulation_number = paste0("simulation", successful_sim),
+    seed = seed,
+    parameters = pars,
+    presence_matrix = simulation$pres,
+    traits_df = simulation$traits,
+    extinxction_matrix = simulation$extinct, 
+    network_list = simulation$L_list,
+    network_crop_list = simulation$L_cropped_list,
+    anc_dist_table = simulation$dist_anc, 
+    list_anc_dist = simulation$list_dist_anc
+  )
+  
+  list_res[[successful_sim]] <- res_sim
+  cat("✅ Stored simulation", successful_sim, "of", nsim, "\n")
+}
+
+
+
+```
+
+
+
+
+
+
+```{r}
+#saveRDS(res_sim, here::here("output/testing/res_sim.rds"))
+#saveRDS(res_sim, here::here("output/testing/res_sim_n.rds"))
+
+# res_sim <- readRDS(here::here("output/testing/res_sim.rds"))
+# res_sim <- readRDS(here::here("output/testing/res_sim_n.rds"))
+
+```
+
+
+```{r}
+sdv_matrices <- compute_dist_matrices(results_simulation = res_sim,
+    		                       int = "foodweb",
+    		                      Smax = pars$Smax,
+    		                      nbasals = pars$Sbasal)
+
+list_svd_pred <- sdv_matrices$list_svd_pred
+
+list_svd_eigen.phy <- sdv_matrices$list_svd_eigen.phy
+
+list_network <- sdv_matrices$list_net_present_spp.letters
+
+list_corrphylo <- sdv_matrices$list_phylo.corr_cropped
+```
+
+
+
+# compute phylosigh ~ S all dim
+
+```{r}
+
+I_max <- pars$I_max
+
+timestep <- vector()
+S <- vector()
+cor_eucl <- vector()
+cor <- vector()
+
+# Loop through each timestep to compute Procrustes correlations
+for (i in seq_along(list_svd_pred)) {
+  
+  proc <- protest(list_svd_pred[[i]], list_svd_eigen.phy[[i]])
+  
+  # Store results
+  timestep[i] <- i
+  S[i] <- ncol(list_svd_pred[[i]]) # Number of species (community size)
+  #cor_eucl[i] <- proc_eucl$t0
+  cor[i] <- proc$t0
+}
+
+
+df_results <- data.frame(timestep = timestep, 
+                         S = S, 
+                         #cor_eucl = cor_eucl, 
+                         cor = cor)
+
+ggplot(df_results, aes(x = S, y = cor)) +
+  geom_point() + # Plot points for both types
+  geom_smooth(method = "gam", formula = y ~ s(x)) + # Add GAM smooth lines for both
+  labs(x = "Community Size (S)", y = "Procrustes Correlation") +
+  theme_classic()+
+  geom_vline(xintercept = I_max, linetype = "dashed") +
+  ylim(0,1)
+
+
+```
+
+# compute phylosigh ~ S with 6d
+
+reduce dimensions
+
+```{r}
+I_max <- pars$I_max
+
+timestep <- vector()
+S <- vector()
+cor <- vector()
+kept_axes <- 6  # Number of axes to keep if S > 6
+
+# Loop through each timestep to compute Procrustes correlations
+for (i in seq_along(list_svd_pred)) {
+  
+  # Get the number of species (community size) at this timestep
+  current_S <- ncol(list_svd_pred[[i]])
+  
+  # Determine the number of axes to keep
+  if (current_S <= kept_axes) {
+    # Keep all axes if S is less than or equal to 6
+    svd_pred_kept <- list_svd_pred[[i]]
+    svd_phy_kept <- list_svd_eigen.phy[[i]]
+  } else {
+    # Keep only 6 axes if S is greater than 6
+    svd_pred_kept <- list_svd_pred[[i]][, 1:kept_axes]
+    svd_phy_kept <- list_svd_eigen.phy[[i]][, 1:kept_axes]
+  }
+  
+  # Run Procrustes analysis on the selected axes
+  proc <- protest(svd_pred_kept, svd_phy_kept)
+  
+  # Store results
+  timestep[i] <- i
+  S[i] <- current_S  # Number of species (community size)
+  cor[i] <- proc$t0
+}
+
+# Create a dataframe to store results
+df_results <- data.frame(timestep = timestep, 
+                         S = S, 
+                         cor = cor)
+
+# Plot the correlation along community size S
+ggplot(df_results, aes(x = timestep, y = cor)) +
+  geom_point(alpha = 0.5) +  # Add transparency to the points
+  #geom_smooth(method = "gam", formula = y ~ s(x), se = TRUE) +  # Add GAM smooth line with confidence interval
+  labs(x = "Time Steps", y = "Phylogenetic signal") +
+  theme_classic() +
+  geom_vline(xintercept = I_max, linetype = "dashed") +
+  ylim(0, 1)
+
+#ggsave(here::here("output/figures/example_1sim_phylosign.png"), height = 4, width = 5)
+
+```
+
+
+# compute phylosigh ~ S optimized d
+
+```{r}
+# Initialize vectors to store results
+timestep <- vector()
+S <- vector()
+cor <- vector()
+d_phylo <- vector()
+d_network <- vector()
+threshold <- 0.9  # Threshold for explained variance (e.g., 90%)
+
+# Loop through each timestep to compute Procrustes correlations
+for (i in seq_along(list_svd_pred)) {
+  
+  # Extract singular values from the original SVD for the interaction matrix
+  svd_result <- svd(list_network[[i]])
+  singular_values <- svd_result$d
+  
+  # Compute cumulative explained variance for the interaction matrix
+  cum_var_pred <- cumsum(singular_values^2) / sum(singular_values^2)
+  
+  # Compute cumulative explained variance for the phylogenetic matrix
+  eigenvalues_phy <- eigen(list_corrphylo[[i]], symmetric = TRUE)$values
+  cum_var_phy <- cumsum(eigenvalues_phy) / sum(eigenvalues_phy)
+  
+  # Determine the number of axes needed to reach the threshold (90% variance)
+  num_axes_pred <- min(which(cum_var_pred >= threshold))
+  num_axes_phy <- min(which(cum_var_phy >= threshold))
+  
+  # Store the number of dimensions retained for each matrix
+  d_network[i] <- num_axes_pred
+  d_phylo[i] <- num_axes_phy
+  
+  # Decide on the number of axes to keep: the maximum of the two
+  num_axes_to_keep <- max(num_axes_pred, num_axes_phy)
+  
+  # Adjust matrices to keep only the necessary axes
+  svd_pred_kept <- list_svd_pred[[i]][, 1:num_axes_to_keep]
+  svd_phy_kept <- list_svd_eigen.phy[[i]][, 1:num_axes_to_keep]
+  
+  # Run Procrustes analysis on the selected axes
+  proc <- protest(svd_pred_kept, svd_phy_kept)
+  
+  # Store results
+  timestep[i] <- i
+  S[i] <- ncol(list_svd_pred[[i]])  # Number of species (community size)
+  cor[i] <- proc$t0
+}
+
+# Create a dataframe to store results
+df_results <- data.frame(timestep = timestep, 
+                         S = S, 
+                         cor = cor,
+                         d_phylo = d_phylo,
+                         d_network = d_network)
+
+# Plot the correlation along community size S
+ggplot(df_results, aes(x = timestep, y = cor)) +
+  geom_point(alpha = 0.5) + # Plot points for the correlation
+ # geom_smooth(method = "gam", formula = y ~ s(x)) + # Add GAM smooth line
+  labs(x = "Time steps", y = "Phylogenetic signal") +
+  theme_classic() +
+  geom_vline(xintercept = I_max, linetype = "dashed") +
+  ylim(0,1)
+
+
+```
+
+
+# compute phylosigh ~ S optimized d with Mantel
+
+```{r}
+# Initialize vectors to store results
+timestep <- vector()
+S <- vector()
+cor <- vector()
+d_phylo <- vector()
+d_network <- vector()
+threshold <- 0.9  # Threshold for explained variance (e.g., 90%)
+
+# Loop through each timestep to compute Procrustes correlations
+for (i in seq_along(list_svd_pred)) {
+  
+  # Extract singular values from the original SVD for the interaction matrix
+  svd_result <- svd(list_network[[i]])
+  singular_values <- svd_result$d
+  
+  # Compute cumulative explained variance for the interaction matrix
+  cum_var_pred <- cumsum(singular_values^2) / sum(singular_values^2)
+  
+  # Compute cumulative explained variance for the phylogenetic matrix
+  eigenvalues_phy <- eigen(list_corrphylo[[i]], symmetric = TRUE)$values
+  cum_var_phy <- cumsum(eigenvalues_phy) / sum(eigenvalues_phy)
+  
+  # Determine the number of axes needed to reach the threshold (90% variance)
+  num_axes_pred <- min(which(cum_var_pred >= threshold))
+  num_axes_phy <- min(which(cum_var_phy >= threshold))
+  
+  # Store the number of dimensions retained for each matrix
+  d_network[i] <- num_axes_pred
+  d_phylo[i] <- num_axes_phy
+  
+  # Decide on the number of axes to keep: the maximum of the two
+  num_axes_to_keep <- max(num_axes_pred, num_axes_phy)
+  
+  # Adjust matrices to keep only the necessary axes
+  svd_pred_kept <- list_svd_pred[[i]][, 1:num_axes_to_keep]
+  svd_phy_kept <- list_svd_eigen.phy[[i]][, 1:num_axes_to_keep]
+  
+     dist_pred <- dist(svd_pred_kept)
+   dist_phy <- dist(svd_phy_kept)
+  
+  # Run Procrustes analysis on the selected axes
+  mantel_result <- mantel(dist_phy, dist_pred, permutations = 999)
+  
+   # Store results
+  timestep[i] <- i
+  S[i] <- ncol(list_svd_pred[[i]])  # Number of species (community size)
+  cor_mantel[i] <- mantel_result$statistic  # Mantel correlation coefficient
+}
+
+# Create a dataframe to store results
+df_mantel_results <- data.frame(timestep = timestep, 
+                                S = S, 
+                                cor_mantel = cor_mantel)
+
+# Plot the Mantel correlation along time steps
+ggplot(df_mantel_results, aes(x = timestep, y = cor_mantel)) +
+  geom_point(alpha = 0.5) +  # Plot points with transparency
+  labs(x = "Time Steps", y = "Mantel Correlation") +
+  theme_classic() +
+  geom_vline(xintercept = I_max, linetype = "dashed") +
+  ylim(0, 1)
+
+
+```
+
+
+
+
+
+
+# Mantel corr between all axes of sdv
+
+
+
+```{r}
+# Initialize vectors to store results
+timestep <- vector()
+S <- vector()
+cor_mantel <- vector()
+
+# Loop through each timestep to compute Mantel correlations
+for (i in seq_along(list_svd_pred)) {
+  
+  # Extract SVD results for prediction and phylogenetic matrices
+  svd_pred <- list_svd_pred[[i]]
+  svd_phy <- list_svd_eigen.phy[[i]]
+  
+  # Compute pairwise Euclidean distance matrices for both
+   dist_pred <- dist(svd_pred)
+   dist_phy <- dist(svd_phy)
+  
+  
+  # Run Mantel test to compare the two distance matrices
+  mantel_result <- mantel(dist_phy, dist_pred, permutations = 999)
+  
+  # Store results
+  timestep[i] <- i
+  S[i] <- ncol(list_svd_pred[[i]])  # Number of species (community size)
+  cor_mantel[i] <- mantel_result$statistic  # Mantel correlation coefficient
+}
+
+# Create a dataframe to store results
+df_mantel_results <- data.frame(timestep = timestep, 
+                                S = S, 
+                                cor_mantel = cor_mantel)
+
+# Plot the Mantel correlation along time steps
+ggplot(df_mantel_results, aes(x = timestep, y = cor_mantel)) +
+  geom_point(alpha = 0.5) +  # Plot points with transparency
+  labs(x = "Time Steps", y = "Mantel Correlation") +
+  theme_classic() +
+  #geom_vline(xintercept = I_max, linetype = "dashed") +
+  ylim(0, 1)
+```
+
+
+
+
+
+
+
+
+
+
+```{r}
+# Melt the dataframe to long format for plotting
+df_long <- reshape2::melt(df_results, id.vars = "timestep", measure.vars = c("d_phylo", "d_network"),
+                          variable.name = "Dimension_Type", value.name = "Dimensions")
+
+# Plot the dimensions retained for phylogenetic and network matrices
+ggplot(df_long, aes(x = timestep, y = Dimensions, color = Dimension_Type)) +
+  geom_point() + # Plot points for dimensions
+  geom_line() +  # Connect points with lines
+  labs(x = "timestep", y = "Number of Dimensions Retained",
+       color = "Dimension Type") +
+  theme_classic() +
+  scale_color_manual(values = c("d_phylo" = "blue", "d_network" = "red")) # Customize colors
+```
+
+
+## Inspection of individual simulation
+
+```{r}
+inspect_simulation_fw(simulation_data = res_sim, nbasals = pars$Sbasal, Smax = pars$Smax)
+```
+
+
+# inspection of network structures
+
+```{r}
+
+#saveRDS(res_sim, here::here("output/results_toplot_networks_timesteps.rds"))
+res_sim <- readRDS(here::here("output/results_toplot_networks_timesteps.rds"))
+
+plot_network_at_timestep_stratified <- function(matrix, timestep) {
+  # Create an igraph object from the adjacency matrix
+  g <- graph_from_adjacency_matrix(as.matrix(matrix), mode = "directed")
+  
+  # Identify species roles
+  in_degree <- igraph::degree(g, mode = "in")   # Number of incoming edges (eaten by others)
+  out_degree <- igraph::degree(g, mode = "out") # Number of outgoing edges (eat others)
+  
+  # Assign roles
+  V(g)$role <- ifelse(in_degree > 0 & out_degree == 0, "Herbivore", 
+                      ifelse(in_degree > 0 & out_degree > 0, "Intermediate", 
+                             "Top Predator"))
+  
+  # Define y-coordinates for stratification based on species role
+  V(g)$y <- ifelse(V(g)$role == "Herbivore", 1, 
+                   ifelse(V(g)$role == "Intermediate", 2, 3))
+  
+  # Generate a custom layout with stratified y-coordinates and evenly spaced x-coordinates
+  layout_df <- data.frame(x = 1:vcount(g), y = V(g)$y)
+  
+  # Create a ggraph plot with a custom layout
+  plot <- ggraph(g, layout = layout_df) + 
+    geom_edge_link(edge_width = 0.1, arrow = arrow(length = unit(2, 'mm')), end_cap = circle(3, 'mm')) + 
+    geom_node_point(aes(color = role), size = 2) + # Plot nodes with color based on role
+    scale_color_manual(values = c("Herbivore" = "#009E73", "Intermediate" = "#E69F00", "Top Predator" = "#CC79A7")) +
+    labs(title = paste("Timestep", timestep), color = "Species Role") +
+    theme_void() + # Use a minimal theme
+    theme(
+      legend.position = "bottom", 
+      legend.text = element_text(size = 12),     # Increase legend text size
+      legend.title = element_text(size = 14),    # Increase legend title size
+      legend.key.size = unit(1.5, "cm")           # Increase legend key size
+    )
+  
+  return(plot)
+}
+
+
+# Timesteps to plot
+timesteps_to_plot <- c(10:20, 30, 40, 50:60, 70, 80, 90:100, 110, 120, 130, 140:150)
+
+list_network <- res_sim$network_crop_list
+
+ list_network_cropped <- lapply(list_network, function(mat) {
+   mat[-c(1:pars$Sbasal), ]  # Remove the first 25 rows
+ })
+
+# Create plots for the specified timesteps using ggraph with stratified layout
+plot_list <- lapply(timesteps_to_plot, function(timestep) {
+  plot_network_at_timestep_stratified(list_network_cropped[[timestep]], timestep)
+})
+
+# Arrange the plots using ggarrange
+final_plot <- ggarrange(plotlist = plot_list, ncol = 3, nrow = 3, common.legend = TRUE)
+
+# Display the final plot
+final_plot
+```
+
+
+
+```{r}
+# Define a base filename
+base_filename <- "example_networks_timesteps"
+
+# Loop through each panel and save it
+for (i in seq_along(final_plot)) {
+  ggsave(
+    filename = paste0(base_filename, "_", i, ".png"),  # Create unique filenames
+    plot = final_plot[[i]],                           # Extract each plot panel
+    width = 6,                                        # Adjust width for individual panels
+    height = 10,                                       # Adjust height for individual panels
+    dpi = 300                                         # High resolution
+  )
+}
+
+```
+
+
+
+
+# compare metrics with empirical foodweb
+
+```{r}
+
+source(here::here("code/functions/functions_metrics_networks.R"))
+net_metr_empirical <- readRDS(here::here("data/net_metrics_empirical.rds"))
+net_metr_empirical$id <- NULL
+# eliminate one problematic foodweb:
+net_metr_empirical <- net_metr_empirical[-13,]
+# reshape dataframe:
+df_metrics_emp <- reshape_df_net.metrics(df_metrics = net_metr_empirical,
+                       interaction = "empirical")
+```
+
+
+
+
+```{r}
+
+
+# list_adj_matrix.f <- list()
+# 
+# for (i in 1:length(list_results)) {
+#   
+#   
+#   res <- list_results[[i]]
+#   
+#   list_adj_matrix.f[[i]] <- get_adjancency_from_simulation.fw_single(list_networks = res$network_list,
+#                                            nbasals = pars$Sbasal,
+#                                            pres_mat = res$presence_matrix)
+#   
+# }
+
+list_network <- res_sim$network_crop_list[-c(1,2)]
+
+ list_network_cropped <- lapply(list_network, function(mat) {
+   mat[-c(1:pars$Sbasal), ]  # Remove the first 25 rows
+ })
+
+list_adj_matrix.f <- list(list_network_cropped[[length(list_network_cropped)]],
+                        list_network_cropped[[length(list_network_cropped)]])
+
+net_metr_sim <- get_network_measures_from_adjacency(list_adj_matrix = list_adj_matrix.f)
+
+
+df_metrics_fw <- reshape_df_net.metrics(df_metrics = net_metr_sim,
+                       interaction = "foodweb")
+
+df_metrics <- merge(df_metrics_fw,
+                    df_metrics_emp,
+                    by = "metric")
+
+
+# plot the results
+
+p_S <- plot_metric_foodweb(df = df_metrics, metric = "S", y_axis = "N species")
+p_link.dens <- plot_metric_foodweb(df = df_metrics, metric = "Link_density", y_axis = "L/S")
+p_C <- plot_metric_foodweb(df = df_metrics, metric = "C", y_axis = "Connectance")
+p_top <- plot_metric_foodweb(df = df_metrics, metric = "perc_tops", y_axis = "% top species")
+p_int <- plot_metric_foodweb(df = df_metrics, metric = "perc_int", y_axis = "% intermediate species")
+p_basal <- plot_metric_foodweb(df = df_metrics, metric = "perc_basals", y_axis = "% basal species")
+p_cannibals <- plot_metric_foodweb(df = df_metrics, metric = "perc_cannibals", y_axis = "% cannibal species")
+p_omnivory <- plot_metric_foodweb(df = df_metrics, metric = "omnivory", y_axis = "omnivory")
+p_sd_gen <- plot_metric_foodweb(df = df_metrics, metric = "sd_gen", y_axis = "SD generality")
+p_sd_vul <- plot_metric_foodweb(df = df_metrics, metric = "sd_vul", y_axis = "SD vulnerability")
+
+plot_metrics_comparison_sim_emp <- ggarrange(
+  p_S,
+  p_link.dens,
+  p_C,
+  p_top,
+  p_int,
+  p_basal,
+  p_cannibals,
+  p_omnivory,
+  p_sd_gen,
+  p_sd_vul,
+  
+  nrow = 5,
+  ncol = 2
+  
+)
+
+plot_metrics_comparison_sim_emp
+
+#ggsave("plot_metrics_comparison_sim_emp.png", height = 12, width = 7)
+```
+
+
+# test phylogenetic signal
+
+```{r}
+sister.group<-function(sis.names,sis.dist){
+	n<-length(sis.dist)
+	distances<-paste0(rep(":",n),sis.dist)
+	sis<-paste0(sis.names,distances)
+	res<-paste0(sis,collapse=",")
+	res<-paste0("(",res,")")
+	res
+}
+
+ToPhylo<-function(data){
+	data.2<-data
+	data.2$repr<-data$spp
+	sisters<-levels(as.factor(data$spp))
+	mothers<-levels(as.factor(data$ancestor))
+	tips<-setdiff(sisters,mothers)
+	root<-setdiff(mothers,sisters)
+	foc.nodes<-unique(data[which(data$spp%in%tips),"ancestor"])
+	n<-length(foc.nodes)
+	data.2$repr[data.2$spp%in%tips]<-data.2$repr[data.2$spp%in%tips]
+	while(n>1){
+		foc.nodes2<-unique(data.2[which(data.2$spp%in%foc.nodes),"ancestor"])
+		for(i in 1:n){
+			daughters<-data.2[which(data.2$ancestor==foc.nodes[i]),"repr"]
+			#print(daughters)
+			daughters.dist<-data.2[which(data.2$ancestor==foc.nodes[i]),"distance"]
+			data.2$repr[data.2$spp==foc.nodes[i]]<-paste0(sister.group(daughters,daughters.dist),foc.nodes[i])
+		}
+		tips<-foc.nodes
+		foc.nodes<-foc.nodes2
+		n<-length(foc.nodes)
+	}
+	daughters<-data.2[which(data.2$ancestor==foc.nodes[1]),"repr"]
+			#print(daughters)
+	daughters.dist<-data.2[which(data.2$ancestor==foc.nodes[1]),"distance"]
+	paste0(sister.group(daughters,daughters.dist),root)
+}
+
+
+ToPhylo2 <- function(data){
+  data.2 <- data
+  data.2$repr <- data$spp
+  sisters <- levels(as.factor(data$spp))
+  mothers <- levels(as.factor(data$ancestor))
+  tips <- setdiff(sisters, mothers)
+  root <- setdiff(mothers, sisters)
+  
+  # In your case, the root might be ancestor=0, we handle that.
+  if(length(root) == 0) root <- 0
+  foc.nodes <- unique(data[which(data$spp %in% tips), "ancestor"])
+  n <- length(foc.nodes)
+  data.2$repr[data.2$spp %in% tips] <- data.2$repr[data.2$spp %in% tips]
+  
+  while(n > 1){
+    foc.nodes2 <- unique(data.2[which(data.2$spp %in% foc.nodes), "ancestor"])
+    for(i in 1:n){
+      daughters <- data.2[which(data.2$ancestor == foc.nodes[i]), "repr"]
+      daughters.dist <- data.2[which(data.2$ancestor == foc.nodes[i]), "distance"]
+      
+      # This block handles the case where the ancestor is still extant (coexists with mutants)
+      if(foc.nodes[i] %in% data.2$spp){
+        daughters <- c(daughters, foc.nodes[i])
+        daughters.dist <- c(daughters.dist, 0)  # Set ancestor's distance as 0
+      }
+      
+      data.2$repr[data.2$spp == foc.nodes[i]] <- paste0(sister.group(daughters, daughters.dist), foc.nodes[i])
+    }
+    tips <- foc.nodes
+    foc.nodes <- foc.nodes2
+    n <- length(foc.nodes)
+  }
+  
+  daughters <- data.2[which(data.2$ancestor == foc.nodes[1]), "repr"]
+  daughters.dist <- data.2[which(data.2$ancestor == foc.nodes[1]), "distance"]
+  
+  paste0(sister.group(daughters, daughters.dist), root, ";")  # Ensuring the tree ends with a semicolon
+}
+```
+
+
+# process output
+
+```{r}
+check_matrix.with.values <- function(matrix) {
+  result <- any(matrix != 0)
+  return(result)
+}
+
+
+eliminate_basals <- function(matrix, nbasals) {
+  mat <- matrix[(nbasals+1):nrow(matrix),]
+  return(mat)
+}
+
+change_sppnames_letters_ancdist.table <- function(mat) {
+  mat[,"ancestor"] <- chartr("0123456789", "ABCDEFGHIJ", mat[,"ancestor"])
+  mat[,"spp"] <- chartr("0123456789", "ABCDEFGHIJ", mat[,"spp"])
+  return(mat)
+}
+
+# convert colnames and rownames from numbers to letters
+convert_sppnames_toletters <-  function(mat) {
+  rownames(mat) <- chartr("0123456789", "ABCDEFGHIJ", rownames(mat))
+  colnames(mat) <- chartr("0123456789", "ABCDEFGHIJ", colnames(mat))
+  return(mat)
+}
+
+# set colnames and rownames as numbers
+set_sppNames_numbers <- function(mat) {
+  rownames(mat) <- seq(1:nrow(mat))
+  colnames(mat) <- seq(1:ncol(mat))
+  return(mat)  
+}
+
+
+# number of timesteps
+n_steps <- length(res_sim$network_crop_list)
+
+presence_matrix <- res_sim$presence_matrix[1:n_steps,] # Crop presence matrix to n_steps
+
+#### Identify timesteps where phylogenetic distances cant be calculated
+non.valid_timesteps_phylo_distance <- c(which(rowSums(presence_matrix) < 3))
+# until what timestep need to discard:
+final.discarded_timestep <- non.valid_timesteps_phylo_distance[length(non.valid_timesteps_phylo_distance)]
+
+#### homogenize elements to start from valid timesteps
+# ancestry table
+list_anc_dist <- res_sim$list_anc_dist[(final.discarded_timestep+1):length(res_sim$list_anc_dist)]
+# network list
+network_list <- res_sim$network_list[(final.discarded_timestep+1):length(res_sim$network_list)]
+# network cropped list
+network_cropped_list <- res_sim$network_crop_list[(final.discarded_timestep+1):length(res_sim$network_crop_list)]
+# presence matrix
+presence_matrix <- presence_matrix[(final.discarded_timestep+1):nrow(presence_matrix),]
+
+
+## ------------------- Check
+if (length(which(is.null(network_list))) > 0) {
+  print("PROBLEM - null network somewhere")
+} 
+if (length(which(is.null(network_cropped_list))) > 0) {
+  print("PROBLEM - null network somewhere in cropped networks")
+} 
+if(length(list_anc_dist) != length(network_list)){
+  print("PROBLEM - length list_anc_dist != length(network_list)")
+}
+## -------------------
+
+
+#### Eliminate basal species
+network_list <- lapply(network_list, eliminate_basals, nbasals = pars$Sbasal)
+croppednetwork_list <- lapply(network_cropped_list, eliminate_basals, nbasals = pars$Sbasal)
+
+
+#### Convert spp names from numbers to letters
+## ancestry-distances table
+list_anc_dist_letters <- lapply(list_anc_dist, change_sppnames_letters_ancdist.table)
+## Network list 
+list_networks_sppnames_numbers <- lapply(network_list, set_sppNames_numbers)
+list_croppednetworks_sppnames_numbers <- lapply(network_cropped_list, set_sppNames_numbers)
+
+list_networks_sppnames_letters <- lapply(list_networks_sppnames_numbers, convert_sppnames_toletters)
+list_croppednetworks_sppnames_letters <- lapply(list_croppednetworks_sppnames_numbers, convert_sppnames_toletters)
+
+
+ ## ------------------- Check
+  if(length(list_anc_dist_letters) != length(list_networks_sppnames_letters)){
+    print("PROBLEM - list_anc_dist_letters != list_networks_sppnames_letters")
+  } 
+  if(length(list_anc_dist_letters) != length(list_croppednetworks_sppnames_letters)){
+    print("PROBLEM - list_anc_dist_letters != list_croppednetworks_sppnames_letters")
+  } 
+  ## -------------------
+
+
+## Loop for obtaining phylogenetic distances:
+
+
+tree_raw <- ToPhylo(list_anc_dist_letters[[timestep]])
+tree_raw <- paste(tree_raw, "root")
+tree_raw <- read.tree(text = sub("A root",";",tree_raw))
+tree_corrected<-tree_raw
+tree_corrected$edge.length<-sapply(tree_corrected$edge.length,function(x) ifelse(x==0,1e-5,x))
+phylo.vcv<-vcv(tree_corrected)
+phylo.corr<-cov2cor(phylo.vcv)
+
+phylo.corr_cropped <- phylo.corr[names(which(presence_matrix[timestep,] == 1)), 
+                                        names(which(presence_matrix[timestep,] == 1))]
+
+svd_eigen.phy<-eigen(list_phylo.corr_cropped[[timestep]], symmetric = T)$vec
+
+
+compute_svd_eigen_phy <- function(data) {
+  # Generate the phylogenetic tree in Newick format using ToPhylo2
+  tree_raw <- ToPhylo2(data)
+  
+  # Convert the Newick string into a tree structure
+  tree <- read.tree(text = tree_raw)
+  
+  # Adjust edge lengths
+  tree$edge.length <- sapply(tree$edge.length, function(x) ifelse(x == 0, 1e-5, x))
+  
+  # Compute the variance-covariance matrix
+  phylo_vcv <- vcv(tree)
+  
+  # Compute the correlation matrix
+  phylo_corr <- cov2cor(phylo_vcv)
+  
+  # Crop the correlation matrix to the currently present species
+ # Identify present species based on the ancestry table
+  present_species <- data$spp[data$`A/E` == "A"]
+  
+  # Crop the correlation matrix to the currently present species
+  phylo_corr_cropped <- phylo_corr[present_species, present_species, drop = FALSE]
+  
+  # Perform SVD on the cropped correlation matrix
+  svd_eigen.phy <- eigen(phylo_corr_cropped, symmetric = TRUE)$vectors
+  
+  return(svd_eigen.phy)
+}
+
+# Apply the function to all elements in list_anc_dist_letters
+list_svd_eigen_phy <- lapply(seq_along(list_anc_dist_letters), function(i) {
+  compute_svd_eigen_phy(list_anc_dist_letters[[i]])
+})
+
+
+
+```
+
+
+
+
+```{r}
+
+list_anc_dist_letters1 <- list_anc_dist_letters[-1]
+
+list_svd_eigen_phy <- lapply(seq_along(list_anc_dist_letters1), function(i) {
+  compute_svd_eigen_phy(list_anc_dist_letters1[[i]])
+})
+
+
+
+# Initialize a list to store results
+list_svd_eigen_phy <- vector("list", length(list_anc_dist_letters))
+
+# Loop through each timestep and try to compute svd_eigen.phy
+for (i in seq_along(list_anc_dist_letters)) {
+  tryCatch({
+    # Attempt to compute the result
+    list_svd_eigen_phy[[i]] <- compute_svd_eigen_phy(list_anc_dist_letters[[i]])
+  }, error = function(e) {
+    # Print the timestep and the error message
+    message(paste("Error at timestep:", i))
+    message("Error message: ", e$message)
+  })
+}
+```
+
+
+```{r}
+tree_raw <- ToPhylo(list_anc_dist_letters[[timestep]])
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+#Test 1: Control for Matrix Size
+
+For this test, we will subsample the larger matrices to match the size of a small subset of species
+
+```{r}
+
+
+# Function to subsample a matrix to a given size
+subsample_matrix <- function(mat, size) {
+  rows <- sample(1:nrow(mat), size)
+  mat[rows, rows]
+}
+
+min_size = 8
+
+# Initialize the dataframe
+df_cor <- data.frame(matrix(ncol = 3, nrow = 0, dimnames = list(NULL, c("timestep", "S", "vec_cor"))))
+
+for (i in 1:length(list_int_dist_mean)) {
+  # Subsample matrices
+  int_sub <- subsample_matrix(list_int_dist_mean[[i]], min_size)
+  phylo_sub <- subsample_matrix(list_phylo_dist[[i]], min_size)
+  
+  # Check for missing or infinite values
+  if (any(is.na(int_sub)) || any(is.infinite(int_sub)) || any(is.na(phylo_sub)) || any(is.infinite(phylo_sub))) {
+    warning(paste("Skipping timestep", i, "due to NA or Inf values"))
+    next
+  }
+  
+  # Run Procrustes test
+  proc <- tryCatch({
+    protest(int_sub, phylo_sub)
+  }, error = function(e) {
+    warning(paste("Skipping timestep", i, "due to error in Procrustes:", e$message))
+    return(NULL)
+  })
+  
+  
+  # Create a temporary dataframe for this timestep
+  df_i <- data.frame(timestep = i, 
+                     S = ncol(int_sub), 
+                     vec_cor = proc$t0)
+  
+  # Bind the result to df_cor
+  df_cor <- rbind(df_cor, df_i)
+}
+
+
+
+
+ggplot(df_cor, aes(x = timestep, y = vec_cor)) +
+  geom_point() + # Plot points for both types
+  geom_smooth(method = "gam", formula = y ~ s(x)) + # Add GAM smooth lines for both
+  labs(x = "timestep", y = "Procrustes Correlation on S = 8") +
+  theme_classic()+
+  ylim(0,1)
+
+```
+
+# 2. Compare against a null model
+
+```{r}
+randomize_matrix <- function(mat) {
+  mat[sample(1:length(mat))]
+}
+
+# Run Procrustes on randomized matrices (null model)
+proc_corr_null <- sapply(seq_along(list_int_dist_mean), function(i) {
+  int_rand <- randomize_matrix(list_int_dist_mean[[i]])
+  phylo_rand <- randomize_matrix(list_phylo_dist[[i]])
+  proc <- protest(int_rand, phylo_rand)
+  proc$t0
+})
+options(scipen = 999)
+proc_corr_null # Procrustes correlations for the null model
+
+df_null <- data.frame("timesteps" = 1:length(proc_corr_null),
+                      "proc_corr_null" = proc_corr_null)
+
+ggplot(df_null, aes(x = timesteps, y = proc_corr_null)) +
+  geom_point() + # Plot points for both types
+  geom_smooth(method = "gam", formula = y ~ s(x)) + # Add GAM smooth lines for both
+  labs(x = "timestep", y = "Procrustes Correlation") +
+  theme_classic()+
+  ylim(0,1)
+
+```
+
+
+
+
+
+

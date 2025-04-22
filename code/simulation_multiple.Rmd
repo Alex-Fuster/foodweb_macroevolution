@@ -1,0 +1,216 @@
+---
+title: "Multiple simulations"
+
+---
+
+
+```{r}
+library(ggplot2)
+library(reshape2)
+library(dplyr)
+library(ggpubr)
+library(igraph)
+library(EnvStats)
+library(aricode)
+library(vegan)
+library(ade4)
+library(ape)
+library(tidyr)
+library(ggraph)
+
+source(here::here("code/functions/functions_simulation.R")) 
+source(here::here("code/functions/functions_simulation_inspection.R"))
+source(here::here("code/functions/functions_simulation_optimized_v1.R"))
+
+```
+
+
+Parameters for plotting
+
+```{r}
+my.theme<-theme(axis.text=element_text(size=12),
+                axis.title = element_text(size = 14),
+                legend.position = "top",
+                legend.text=element_text(size=10),
+                legend.title = element_text(size=12),
+                plot.title = element_text(face="bold",size=14,margin=margin(0,0,20,0),hjust = 0.5),
+                axis.title.y = element_text(margin = margin(t = 0, r = 15, b = 0, l = 0)),
+                axis.title.x = element_text(margin = margin(t = 15, r = 0, b = 0, l = 0)))
+```
+
+
+
+
+## Parameters foodweb
+
+```{r}
+pars = list()
+
+pars$competition_coefficient = 0.025
+pars$Sbasal = 5 # number of basal species
+pars$Smax = 1000 # Maximal number of species allowed
+#pars$Bspe = 4 # Basal species impact on the speciation probality
+#pars$Bext = 4 # Basal species impact on extinction probability
+pars$av_r = 0.18#0.185 # 0.2 range of the niche
+pars$sd = 0.5*pars$av_r + 0.0001 # Standard deviation of the normal distribution used to calculate the niche optimum trait of a new species
+#pars$sd = 0.5*pars$av_r + 0.0001 # Standard deviation of the normal distribution used to calculate the niche optimum trait of a new species
+
+# PROBABILITY OF MUTATION
+
+pars$u_max = 0.23#0.15 #0.15 # mutation probability (0.075, )
+pars$d = 0.5 # Decrease speed of the establishment probability
+pars$I_max = 60 # Maximal number of interactioning species
+pars$beta_n =  1 # parameter of the beta distribution 
+
+# STRENGTH OF NEUTRAL-DRIVEN EVOLUTION
+
+pars$SN = 0 # strength for neutral-driven evolution
+
+# PROBABILITY OF ESTABLISHMENT
+
+# strength of selection-driven selection is 1 - SN
+pars$estab_prob_neutral = 0.5 # neutral probability of establishment
+
+# Facilitation & Foodweb
+
+pars$u_0pos = 1  
+pars$u_1pos = -1 
+pars$a_upos = 0.45 
+
+# PROBABILITY OF EXTINCTION
+
+pars$ext_prob_neutral = rep(0.0005, pars$Smax) # neutral probability of extinction
+
+# Competition
+
+pars$e_0neg = 0.1 #0.15 # Asymptotic extinction probability with infinite negative interactions
+pars$a_eneg = 0.025 # Shape of the exponential decay of the negative extinction - interaction relationship
+pars$e_1neg = -pars$e_0neg  # Extinction probability with absence of interactions
+
+# Facilitation & Foodweb
+
+pars$e_0pos = 0.075 
+pars$e_1pos = 5.19 
+pars$a_epos = 1.2 
+
+
+#########################################
+
+# Logistic function parameters
+pars$k <- 10  # Steepness of the logistic curve
+pars$midpoint <- 0.5  # Midpoint for the logistic curve
+
+```
+
+
+# parameters simulation
+
+```{r}
+nsteps =  150
+nsim = 1
+
+```
+
+
+
+
+--------------------------
+beta_ext * 0.097 + (1 - beta_ext) * avg_similarity
+
+# New pars based on testing (13 sept)
+
+```{r}
+pars$u_0pos <- 0.4   # Baseline probability
+pars$u_1pos <- 0.7  # Scaling factor
+pars$a_upos <- 0.2   # Shape of the exponential increase
+
+pars$e_0neg <- 0.01   # Baseline probability
+pars$e_1neg <- 0.05 #0.5 # Scaling factor for out-degree
+pars$a_eneg <- 0.2 #0.2  Shape of the exponential increase
+
+pars$beta_ext <- 0.8 # Control strength between out-degree and similarity
+
+pars$competition_coefficient <- 0.01 #0.1 #0.1 #0.06
+
+pars$multiplier = 0.9 #1
+
+```
+
+```{r}
+pars$beta_n =  50#50
+```
+
+
+Top predators with:
+
+
+```{r}
+pars$av_r = 0.17 #0.16
+pars$beta_ext <- 0.8 # Control strength between out-degree and similarity
+pars$competition_coefficient <- 0.0085#0.0085 #0.0025 #0.1 #0.1 #0.06
+pars$multiplier = 1 # or also 0.8
+```
+
+
+```{r}
+nsim = 3
+```
+
+
+
+```{r}
+output_dir <- "../simulations"
+dir.create(output_dir, showWarnings = FALSE)
+
+list_res <- list()
+seed_list <- NULL
+seed_record <- rep(NA, nsim)
+successful_sim <- 0
+total_nb_sim <- 0
+
+while (successful_sim < nsim) {
+  seed <- sample.int(80000, 1)
+  if (seed %in% seed_list) next
+  seed_list <- c(seed_list, seed)
+
+  cat("Trying seed:", seed, "\n")
+  simulation <- sim_model(seed = seed, pars = pars, nsteps = nsteps)
+
+  if (is.null(simulation)) {
+    cat("❌ Simulation discarded (didn't meet criteria).\n")
+    next
+  }
+
+  successful_sim <- successful_sim + 1
+  total_nb_sim <- total_nb_sim + 1
+  seed_record[successful_sim] <- seed
+
+  res_sim <- list(
+    simulation_number = paste0("simulation", successful_sim),
+    seed = seed,
+    parameters = pars,
+    presence_matrix = simulation$pres,
+    traits_df = simulation$traits,
+    extinxction_matrix = simulation$extinct,
+    network_list = simulation$L_list,
+    network_crop_list = simulation$L_cropped_list,
+    anc_dist_table = simulation$dist_anc,
+    list_anc_dist = simulation$list_dist_anc
+  )
+
+  saveRDS(res_sim, file = file.path(output_dir, paste0("res_sim_", successful_sim, ".rds")))
+  cat("✅ Stored simulation", successful_sim, "of", nsim, "\n")
+}
+
+# ✅ Save metadata after loop is complete
+metadata <- data.frame(
+  simulation_number = paste0("simulation", seq_along(seed_record)),
+  seed = seed_record
+)
+write.csv(metadata, file = file.path(output_dir, "simulation_metadata.csv"), row.names = FALSE)
+
+writeLines(paste("Number of attempted simulations (successful + failed):", total_nb_sim),
+           con = file.path(output_dir, "simulation_summary.txt"))
+
+```
+
