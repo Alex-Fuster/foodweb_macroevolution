@@ -392,3 +392,70 @@ combined_plot <- ggarrange(plotlist = plot_list,
 combined_plot
 
 ```
+
+
+
+# MODELS
+
+
+## Diversification - centrality
+
+
+```{r}
+library(brms)
+```
+
+```{r}
+library(brms)
+
+rate_vars <- c("extinction_rate", "speciation_rate", "diversification_rate")
+
+# Prepare clean data
+clean_df <- combined_df %>%
+  select(spp_letter, all_of(rate_vars), eigen) %>%
+  drop_na()
+
+
+model_specs <- tibble(rate_type = rate_vars) %>%
+  mutate(
+    formula = map(rate_type, ~ as.formula(paste(.x, "~ eigen"))),
+    model = map(formula, ~ brm(
+      formula = .x,
+      data = clean_df,
+      family = student(),   # Robust to outliers
+      chains = 2, iter = 2000, warmup = 1000,
+      refresh = 0, seed = 42
+    ))
+  )
+
+```
+
+```{r}
+library(tibble)
+library(tidybayes)
+
+posterior_draws <- model_specs %>%
+  mutate(draws = map(model, ~ as_draws_df(.x) %>%
+                       select(b_eigen) %>%
+                       rename(value = b_eigen))) %>%
+  select(rate_type, draws) %>%
+  unnest(draws)
+
+ggplot(posterior_draws, aes(x = value, fill = rate_type, color = rate_type)) +
+  geom_density(alpha = 0.3, size = 1) +
+  geom_vline(xintercept = 0, linetype = "dashed") +
+  facet_wrap(~ rate_type, scales = "free") +
+  labs(
+    title = "Posterior Distributions: Effect of Eigen Centrality on Evolutionary Rates",
+    x = "Slope (β for eigen centrality)",
+    y = "Density"
+  ) +
+  theme_minimal()
+
+
+```
+
+
+
+
+

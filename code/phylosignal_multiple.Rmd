@@ -21,6 +21,8 @@ library(purrr)
 
 source(here::here("code/functions/functions_simulation.R")) 
 source(here::here("code/functions/function_to_phylo.R")) 
+#source(here::here("code/functions/function_compute_decomposed_matrices.R")) # it works for al the phylosign analyses
+
 source(here::here("code/functions/function_compute_decomposed_matrices.R"))
 ```
 

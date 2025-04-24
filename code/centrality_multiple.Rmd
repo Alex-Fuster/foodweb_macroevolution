@@ -1,0 +1,112 @@
+---
+title: "Centrality-diversification analysis for multiple simulations"
+
+---
+
+```{r}
+library(dplyr)
+library(tidyr)
+library(purrr)
+library(brms)
+library(ggplot2)
+library(tidybayes)
+```
+
+
+
+## Get data
+
+```{r}
+
+# Paths
+sim_files <- list.files("../simulations", full.names = TRUE, pattern = "res_sim_\\d+\\.rds")
+mat_files <- list.files("decomposed_matrices", full.names = TRUE, pattern = "sdv_matrices_\\d+\\.rds")
+
+# Combine life history and centrality summaries across simulations
+all_species_data <- map_dfr(seq_along(sim_files), function(i) {
+  cat("Processing simulation", i, "\n")
+  
+  res_sim <- readRDS(sim_files[i])
+  result_matrices <- readRDS(mat_files[i])
+  
+  # Compute diversification rates
+  life_df <- result_matrices$species_life_summary
+  life_df$longevity <- with(life_df, timestep_extinct - timestep_birth + 1)
+  life_df$extinction_rate <- ifelse(!is.na(life_df$longevity) & life_df$longevity > 0,
+                                    1 / life_df$longevity, NA)
+  life_df$speciation_rate <- ifelse(!is.na(life_df$longevity) & life_df$longevity > 0,
+                                    life_df$n_descendants / life_df$longevity, NA)
+  life_df$diversification_rate <- with(life_df, speciation_rate - extinction_rate)
+  life_df$sim <- i
+  
+  # Compute centralities
+  net_list <- result_matrices$list_net_present_spp.letters
+  centrality_data <- map_dfr(seq_along(net_list), function(t) {
+    mat <- net_list[[t]]
+    if (nrow(mat) < 2 || sum(mat) == 0) return(NULL)
+    
+    g <- igraph::graph_from_adjacency_matrix(mat, mode = "directed")
+    eig <- tryCatch(eigen_centrality(g, directed = TRUE)$vector, error = function(e) rep(NA, length(V(g))))
+    data.frame(spp_letter = names(eig), timestep = t, eigen = eig)
+  })
+  
+  # Mean eigenvector centrality
+  eigen_summary <- centrality_data %>%
+    group_by(spp_letter) %>%
+    summarise(eigen = mean(eigen, na.rm = TRUE), .groups = "drop")
+  
+  # Merge
+  merged_df <- left_join(life_df, eigen_summary, by = "spp_letter")
+  merged_df
+})
+
+# Clean up
+clean_df <- all_species_data %>%
+  select(spp_letter, sim, extinction_rate, speciation_rate, diversification_rate, eigen) %>%
+  drop_na()
+
+```
+
+## Model
+
+```{r}
+
+
+# Define rate variables
+rate_vars <- c("extinction_rate", "speciation_rate", "diversification_rate")
+
+# Run Bayesian models
+model_specs <- tibble(rate_type = rate_vars) %>%
+  mutate(
+    formula = map(rate_type, ~ as.formula(paste(.x, "~ eigen"))),
+    model = map(formula, ~ brm(
+      formula = .x,
+      data = clean_df,
+      family = student(),  # More robust to outliers and skew
+      chains = 2, iter = 2000, warmup = 1000,
+      refresh = 0, seed = 42
+    ))
+  )
+
+# Extract posterior draws for the slope from each model
+posterior_draws_df <- model_specs %>%
+  mutate(draws = map(model, ~ as_draws_df(.x) %>% 
+                       select(b_eigen) %>%
+                       rename(slope = b_eigen))) %>%
+  select(rate_type, draws) %>%
+  unnest(draws)
+
+# Plot full posterior distributions
+ggplot(posterior_draws_df, aes(x = slope, y = rate_type, fill = rate_type)) +
+  stat_halfeye(.width = c(0.5, 0.95), point_interval = mean_qi, normalize = "xy") +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "gray50") +
+  labs(
+    title = "Posterior Distributions: Effect of Eigen Centrality on Evolutionary Rates",
+    x = "Posterior Distribution of Slope",
+    y = "Rate Type"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "none")
+
+```
+

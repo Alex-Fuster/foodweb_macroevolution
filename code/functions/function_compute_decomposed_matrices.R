@@ -254,12 +254,74 @@ compute_decomposed_matrices <- function(results_simulation, int, Smax, nbasals) 
     print("PROBLEM - Interact and phylo dist. matrices dont have the same order of colnames")
   }
   
+  ##########################################################
+  # Create a table of species lifespan and descendants
+  all_anc_dist <- results_simulation$list_anc_dist
+  
+  # Vector of all species (original names as characters)
+  all_species <- unique(unlist(lapply(all_anc_dist, function(x) x$spp)))
+  
+  # Initialize data.frame
+  species_life_summary <- data.frame(
+    spp_number = all_species,
+    spp_letter = NA,
+    timestep_birth = NA,
+    timestep_extinct = NA,
+    n_descendants = 0,
+    stringsAsFactors = FALSE
+  )
+  
+  # Convert column names of presence_matrix to letters (in sync with earlier conversion)
+  spp_letters <- colnames(presence_matrix)
+  
+  # Assign letter names
+  species_life_summary$spp_letter <- spp_letters[match(species_life_summary$spp_number, chartr("ABCDEFGHIJ", "0123456789", spp_letters))]
+  
+  # Fill birth and extinction times
+  for (i in 1:nrow(species_life_summary)) {
+    spp_letter <- species_life_summary$spp_letter[i]
+    
+    if (spp_letter %in% spp_letters) {
+      presence_vector <- presence_matrix[, spp_letters == spp_letter]
+      
+      if (any(presence_vector == 1)) {
+        species_life_summary$timestep_birth[i] <- which(presence_vector == 1)[1]
+        species_life_summary$timestep_extinct[i] <- tail(which(presence_vector == 1), 1)
+      }
+    }
+  }
+  
+  # Count descendants using the full untrimmed ancestry table
+  # Count unique descendant species per ancestor
+  # Gather all ancestor–descendant relationships across timesteps
+  all_relationships <- do.call(rbind, lapply(all_anc_dist, function(x) {
+    x[, c("spp", "ancestor")]
+  }))
+  
+  # Remove rows where ancestor is 0 (i.e., origin)
+  all_relationships <- all_relationships[all_relationships$ancestor != "0", ]
+  
+  # For each species, count how many **unique spp** list it as their ancestor
+  unique_descendants <- split(all_relationships$spp, all_relationships$ancestor)
+  desc_count <- sapply(unique_descendants, function(x) length(unique(x)))
+  
+  # Match to the summary table
+  species_life_summary$n_descendants <- ifelse(
+    species_life_summary$spp_number %in% names(desc_count),
+    desc_count[species_life_summary$spp_number],
+    0
+  )
   
   
-  result <- list("list_svd_pred" = list_svd_pred,
-                 "list_svd_eigen.phy" = list_svd_eigen.phy,
-                 "list_net_present_spp.letters" = list_net_present_spp.letters,
-                 "list_phylo.corr_cropped" = list_phylo.corr_cropped)
+  
+  result <- list(
+    list_svd_pred = list_svd_pred,
+    list_svd_eigen.phy = list_svd_eigen.phy,
+    list_net_present_spp.letters = list_net_present_spp.letters,
+    list_phylo.corr_cropped = list_phylo.corr_cropped,
+    species_life_summary = species_life_summary,
+    presence_matrix = presence_matrix
+  )
   
   return(result)
 }
@@ -592,12 +654,14 @@ species_life_summary$n_descendants <- ifelse(
 
 
   
-result <- list("list_svd_pred" = list_svd_pred,
-               "list_svd_eigen.phy" = list_svd_eigen.phy,
-               "list_net_present_spp.letters" = list_net_present_spp.letters,
-               "list_phylo.corr_cropped" = list_phylo.corr_cropped,
-               "species_life_summary" = species_life_summary,
-               "presence_matrix" = presence_matrix)  # ← add this line
+  result <- list(
+    list_svd_pred = list_svd_pred,
+    list_svd_eigen.phy = list_svd_eigen.phy,
+    list_net_present_spp.letters = list_net_present_spp.letters,
+    list_phylo.corr_cropped = list_phylo.corr_cropped,
+    species_life_summary = species_life_summary,
+    presence_matrix = presence_matrix
+  )
   
   return(result)
 }
