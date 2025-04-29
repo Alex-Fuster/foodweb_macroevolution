@@ -23,7 +23,8 @@ source(here::here("code/functions/functions_simulation.R"))
 source(here::here("code/functions/function_to_phylo.R")) 
 #source(here::here("code/functions/function_compute_decomposed_matrices.R")) # it works for al the phylosign analyses
 
-source(here::here("code/functions/function_compute_decomposed_matrices.R"))
+#source(here::here("code/functions/function_compute_decomposed_matrices.R"))
+source(here::here("code/functions/function_compute_decomposed_matrices_opt_spnames_v2.R"))
 ```
 
 
@@ -33,11 +34,154 @@ FUNCTION PROCRUSTES SIGNAL
 
 # FUNCTION TO COMPUTE PROCRUSTES CORRELATION
 
+# compute_procrustes_signal <- function(sdv_matrices, threshold = 0.8) {
+#   list_svd_pred <- sdv_matrices$list_svd_pred
+#   list_svd_eigen.phy <- sdv_matrices$list_svd_eigen.phy
+#   list_network <- sdv_matrices$list_net_present_spp.letters
+#   list_corrphylo <- sdv_matrices$list_phylo.corr_cropped
+#   
+#   timestep <- vector()
+#   S <- vector()
+#   cor <- vector()
+#   d_phylo <- vector()
+#   d_network <- vector()
+#   
+#   for (i in seq_along(list_svd_pred)) {
+#     svd_result <- svd(list_network[[i]])
+#     singular_values <- svd_result$d
+#     cum_var_pred <- cumsum(singular_values^2) / sum(singular_values^2)
+#     
+#     eigenvalues_phy <- eigen(list_corrphylo[[i]], symmetric = TRUE)$values
+#     cum_var_phy <- cumsum(eigenvalues_phy) / sum(eigenvalues_phy)
+#     
+#     num_axes_pred <- min(which(cum_var_pred >= threshold))
+#     num_axes_phy <- min(which(cum_var_phy >= threshold))
+#     num_axes_to_keep <- max(num_axes_pred, num_axes_phy)
+#     
+#     svd_pred_kept <- list_svd_pred[[i]][, 1:num_axes_to_keep, drop = FALSE]
+#     svd_phy_kept <- list_svd_eigen.phy[[i]][, 1:num_axes_to_keep, drop = FALSE]
+#     
+#     proc <- protest(svd_pred_kept, svd_phy_kept)
+#     
+#     timestep[i] <- i
+#     S[i] <- ncol(list_svd_pred[[i]])
+#     cor[i] <- proc$t0
+#     d_phylo[i] <- num_axes_phy
+#     d_network[i] <- num_axes_pred
+#   }
+#   
+#   data.frame(
+#     timestep = timestep,
+#     S = S,
+#     cor = cor,
+#     d_phylo = d_phylo,
+#     d_network = d_network
+#   )
+# }
+
+# compute_procrustes_signal <- function(sdv_matrices, threshold = 0.8) {
+#   list_svd_pred <- sdv_matrices$list_svd_pred
+#   list_svd_eigen.phy <- sdv_matrices$list_svd_eigen.phy
+#   list_network <- sdv_matrices$list_net_present_spp.letters
+#   list_corrphylo <- sdv_matrices$list_phylo.corr_cropped
+#   basal_species <- sdv_matrices$basal_species
+#   
+#   timestep <- vector()
+#   S <- vector()
+#   cor <- vector()
+#   d_phylo <- vector()
+#   d_network <- vector()
+#   
+#   for (i in seq_along(list_svd_pred)) {
+#     cat("Processing step", i, "\n")
+#     
+#     network_i <- list_network[[i]]
+#     
+#     # ➔ NEW: Remove basals first
+#     species_alive <- setdiff(rownames(network_i), basal_species)
+#     
+#     # Identify species that are alive and interacting
+#     species_with_links <- species_alive[rowSums(network_i[species_alive, , drop = FALSE] != 0) > 0]
+#     
+#     if (length(species_with_links) < 3) {
+#       cat("Warning: less than 3 linked species at step", i, "- skipping\n")
+#       next
+#     }
+#     
+#     # Subset matrices to interacting species
+#     net_crop <- network_i[species_with_links, species_with_links, drop = FALSE]
+#     phy_crop <- list_corrphylo[[i]][species_with_links, species_with_links, drop = FALSE]
+#     
+#     # Compute cumulative variance explained
+#     svd_result <- svd(net_crop)
+#     singular_values <- svd_result$d
+#     
+#     if (any(is.na(singular_values)) || all(singular_values == 0)) {
+#       cat("Warning: singular values NA or 0 at step", i, "- skipping\n")
+#       next
+#     }
+#     
+#     cum_var_pred <- cumsum(singular_values^2) / sum(singular_values^2)
+#     
+#     eigenvalues_phy <- eigen(phy_crop, symmetric = TRUE)$values
+#     
+#     if (any(is.na(eigenvalues_phy)) || all(eigenvalues_phy == 0)) {
+#       cat("Warning: phylogenetic eigenvalues NA or 0 at step", i, "- skipping\n")
+#       next
+#     }
+#     
+#     cum_var_phy <- cumsum(eigenvalues_phy) / sum(eigenvalues_phy)
+#     
+#     num_axes_pred <- suppressWarnings(min(which(cum_var_pred >= threshold)))
+#     num_axes_phy <- suppressWarnings(min(which(cum_var_phy >= threshold)))
+#     
+#     if (is.infinite(num_axes_pred) || is.infinite(num_axes_phy)) {
+#       cat("Warning: no valid axes at step", i, "- skipping\n")
+#       next
+#     }
+#     
+#     num_axes_to_keep <- max(num_axes_pred, num_axes_phy)
+#     
+#     svd_pred_kept <- svd_result$v[, 1:num_axes_to_keep, drop = FALSE]
+#     
+#     eig_phy_crop <- eigen(phy_crop, symmetric = TRUE)
+#     svd_phy_kept <- eig_phy_crop$vectors[, 1:num_axes_to_keep, drop = FALSE]
+#     
+#     if (any(is.na(svd_pred_kept)) || any(is.infinite(svd_pred_kept)) ||
+#         any(is.na(svd_phy_kept)) || any(is.infinite(svd_phy_kept))) {
+#       cat("Warning: NA or Inf in matrices at step", i, "- skipping\n")
+#       next
+#     }
+#     
+#     if (nrow(svd_pred_kept) != nrow(svd_phy_kept)) {
+#       cat("Warning: unequal rows at step", i, "- skipping\n")
+#       next
+#     }
+#     
+#     proc <- protest(svd_pred_kept, svd_phy_kept)
+#     
+#     timestep <- c(timestep, i)
+#     S <- c(S, length(species_with_links))
+#     cor <- c(cor, proc$t0)
+#     d_phylo <- c(d_phylo, num_axes_phy)
+#     d_network <- c(d_network, num_axes_pred)
+#   }
+#   
+#   data.frame(
+#     timestep = timestep,
+#     S = S,
+#     cor = cor,
+#     d_phylo = d_phylo,
+#     d_network = d_network
+#   )
+# }
+
 compute_procrustes_signal <- function(sdv_matrices, threshold = 0.8) {
   list_svd_pred <- sdv_matrices$list_svd_pred
   list_svd_eigen.phy <- sdv_matrices$list_svd_eigen.phy
   list_network <- sdv_matrices$list_net_present_spp.letters
   list_corrphylo <- sdv_matrices$list_phylo.corr_cropped
+  basal_species <- sdv_matrices$basal_species
   
   timestep <- vector()
   S <- vector()
@@ -46,27 +190,78 @@ compute_procrustes_signal <- function(sdv_matrices, threshold = 0.8) {
   d_network <- vector()
   
   for (i in seq_along(list_svd_pred)) {
-    svd_result <- svd(list_network[[i]])
+    cat("Processing step", i, "\n")
+    
+    network_i <- list_network[[i]]
+    
+    # ➔ NEW: Remove basals first
+    species_alive <- setdiff(rownames(network_i), basal_species)
+    
+    # Identify species that are alive and interacting
+    species_with_links <- species_alive[rowSums(network_i[species_alive, , drop = FALSE] != 0) > 0]
+    
+    if (length(species_with_links) < 3) {
+      cat("Warning: less than 3 linked species at step", i, "- skipping\n")
+      next
+    }
+    
+    # Subset matrices to interacting species
+    net_crop <- network_i[species_with_links, species_with_links, drop = FALSE]
+    phy_crop <- list_corrphylo[[i]][species_with_links, species_with_links, drop = FALSE]
+    
+    # Compute cumulative variance explained
+    svd_result <- svd(net_crop)
     singular_values <- svd_result$d
+    
+    if (any(is.na(singular_values)) || all(singular_values == 0)) {
+      cat("Warning: singular values NA or 0 at step", i, "- skipping\n")
+      next
+    }
+    
     cum_var_pred <- cumsum(singular_values^2) / sum(singular_values^2)
     
-    eigenvalues_phy <- eigen(list_corrphylo[[i]], symmetric = TRUE)$values
+    eigenvalues_phy <- eigen(phy_crop, symmetric = TRUE)$values
+    
+    if (any(is.na(eigenvalues_phy)) || all(eigenvalues_phy == 0)) {
+      cat("Warning: phylogenetic eigenvalues NA or 0 at step", i, "- skipping\n")
+      next
+    }
+    
     cum_var_phy <- cumsum(eigenvalues_phy) / sum(eigenvalues_phy)
     
-    num_axes_pred <- min(which(cum_var_pred >= threshold))
-    num_axes_phy <- min(which(cum_var_phy >= threshold))
+    num_axes_pred <- suppressWarnings(min(which(cum_var_pred >= threshold)))
+    num_axes_phy <- suppressWarnings(min(which(cum_var_phy >= threshold)))
+    
+    if (is.infinite(num_axes_pred) || is.infinite(num_axes_phy)) {
+      cat("Warning: no valid axes at step", i, "- skipping\n")
+      next
+    }
+    
     num_axes_to_keep <- max(num_axes_pred, num_axes_phy)
     
-    svd_pred_kept <- list_svd_pred[[i]][, 1:num_axes_to_keep, drop = FALSE]
-    svd_phy_kept <- list_svd_eigen.phy[[i]][, 1:num_axes_to_keep, drop = FALSE]
+    svd_pred_kept <- svd_result$v[, 1:num_axes_to_keep, drop = FALSE]
+    
+    eig_phy_crop <- eigen(phy_crop, symmetric = TRUE)
+    svd_phy_kept <- eig_phy_crop$vectors[, 1:num_axes_to_keep, drop = FALSE]
+    
+    if (any(is.na(svd_pred_kept)) || any(is.infinite(svd_pred_kept)) ||
+        any(is.na(svd_phy_kept)) || any(is.infinite(svd_phy_kept))) {
+      cat("Warning: NA or Inf in matrices at step", i, "- skipping\n")
+      next
+    }
+    
+    if (nrow(svd_pred_kept) != nrow(svd_phy_kept)) {
+      cat("Warning: unequal rows at step", i, "- skipping\n")
+      next
+    }
     
     proc <- protest(svd_pred_kept, svd_phy_kept)
     
-    timestep[i] <- i
-    S[i] <- ncol(list_svd_pred[[i]])
-    cor[i] <- proc$t0
-    d_phylo[i] <- num_axes_phy
-    d_network[i] <- num_axes_pred
+    timestep <- c(timestep, i)
+    S <- c(S, length(species_with_links))
+    cor <- c(cor, proc$t0)
+    d_phylo <- c(d_phylo, num_axes_phy)
+    d_network <- c(d_network, num_axes_pred)
   }
   
   data.frame(
@@ -77,6 +272,9 @@ compute_procrustes_signal <- function(sdv_matrices, threshold = 0.8) {
     d_network = d_network
   )
 }
+
+
+
 
 
 # FUNCTION TO COMPUTE MANTEL CORRELATION
@@ -321,14 +519,14 @@ for (i in seq_along(files)) {
   
   res_sim <- readRDS(files[i])
   
-  sdv_matrices <- compute_decomposed_matrices(
+  sdv_matrices <- compute_decomposed_matrices_roles(
     results_simulation = res_sim,
     int = "foodweb",
     Smax = 1000,
     nbasals = 5
   )
   
-  saveRDS(sdv_matrices, file = file.path("decomposed_matrices", paste0("sdv_matrices_", i, ".rds")))
+  saveRDS(sdv_matrices, file = file.path("decomposed_matrices", paste0("sdv_matrices_roles_", i, ".rds")))
 }
 
 
@@ -338,9 +536,10 @@ for (i in seq_along(files)) {
 
 # PROCRUSTES
 
+
 ```{r}
 
-decomposed_files <- list.files("decomposed_matrices", full.names = TRUE, pattern = "sdv_matrices_\\d+\\.rds")
+decomposed_files <- list.files("decomposed_matrices", full.names = TRUE, pattern = "sdv_matrices_roles_\\d+\\.rds")
 
 all_procrustes_results <- list()
 
@@ -348,33 +547,43 @@ for (i in seq_along(decomposed_files)) {
   cat("Processing decomposed simulation", i, "\n")
   sdv_matrices <- readRDS(decomposed_files[i])
   
-  result <- compute_procrustes_signal(sdv_matrices)
+  result <- compute_procrustes_signal_roles(sdv_matrices)
   result$simulation <- i
   all_procrustes_results[[i]] <- result
 }
 
 df_all <- bind_rows(all_procrustes_results)
 
+
+```
+
+
+```{r}
 summary_df <- df_all %>%
-  group_by(timestep) %>%
+  group_by(role, timestep) %>%
   summarize(
     mean_cor = mean(cor, na.rm = TRUE),
     sd_cor = sd(cor, na.rm = TRUE),
     .groups = "drop"
   )
 
-ggplot(summary_df, aes(x = timestep, y = mean_cor)) +
-  geom_line(color = "steelblue", size = 1) +
-  geom_ribbon(aes(ymin = mean_cor - sd_cor, ymax = mean_cor + sd_cor),
-              fill = "steelblue", alpha = 0.3) +
+ggplot(summary_df, aes(x = timestep, y = mean_cor, color = role, fill = role)) +
+  geom_line(size = 1) +
+  geom_ribbon(aes(ymin = mean_cor - sd_cor, ymax = mean_cor + sd_cor), alpha = 0.3, color = NA) +
   labs(
     x = "Timestep",
-    y = "Procrustes correlation"
+    y = "Procrustes correlation",
+    title = "Procrustes signal: predators vs prey vs both"
   ) +
-  theme_minimal()+
+  scale_color_manual(values = c("pred" = "steelblue", "prey" = "tomato", "both" = "darkgreen")) +
+  scale_fill_manual(values = c("pred" = "steelblue", "prey" = "tomato", "both" = "darkgreen")) +
+  theme_minimal() +
   ylim(0, 1)
 
 ```
+
+
+
 
 STORE DATA
 
@@ -387,8 +596,10 @@ STORE DATA
 # MANTEL
 
 
+STORE DATA
+
 ```{r}
-decomposed_files <- list.files("decomposed_matrices", full.names = TRUE, pattern = "sdv_matrices_\\d+\\.rds")
+decomposed_files <- list.files("decomposed_matrices", full.names = TRUE, pattern = "sdv_matrices_roles_\\d+\\.rds")
 
 all_mantel_results <- list()
 
@@ -396,39 +607,41 @@ for (i in seq_along(decomposed_files)) {
   cat("Processing decomposed simulation", i, "\n")
   sdv_matrices <- readRDS(decomposed_files[i])
   
-  result <- compute_mantel_signal(sdv_matrices)
+  result <- compute_mantel_signal_roles(sdv_matrices)
   result$simulation <- i
   all_mantel_results[[i]] <- result
 }
 
 df_mantel <- bind_rows(all_mantel_results)
 
+```
 
+
+
+```{r}
 summary_mantel <- df_mantel %>%
-  group_by(timestep) %>%
+  group_by(role, timestep) %>%
   summarize(
     mean_cor = mean(cor_mantel, na.rm = TRUE),
     sd_cor = sd(cor_mantel, na.rm = TRUE),
     .groups = "drop"
   )
 
-ggplot(summary_mantel, aes(x = timestep, y = mean_cor)) +
-  geom_line(color = "darkred", size = 1) +
-  geom_ribbon(aes(ymin = mean_cor - sd_cor, ymax = mean_cor + sd_cor),
-              fill = "darkred", alpha = 0.3) +
+ggplot(summary_mantel, aes(x = timestep, y = mean_cor, color = role, fill = role)) +
+  geom_line(size = 1) +
+  geom_ribbon(aes(ymin = mean_cor - sd_cor, ymax = mean_cor + sd_cor), alpha = 0.2, color = NA) +
   labs(
     x = "Timestep",
-    y = "Mantel correlation"
-  ) +
+    y = "Mantel correlation",
+    color = "Role",
+    fill = "Role"
+  )  +
+  scale_color_manual(values = c("pred" = "steelblue", "prey" = "tomato", "both" = "darkgreen")) +
+  scale_fill_manual(values = c("pred" = "steelblue", "prey" = "tomato", "both" = "darkgreen")) +
   theme_minimal() +
   ylim(0, 1)
-
 ```
-STORE DATA
 
-```{r}
-
-```
 
 
 # CLUSTERS

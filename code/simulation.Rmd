@@ -19,8 +19,8 @@ library(ggraph)
 
 source(here::here("code/functions/functions_simulation.R")) 
 source(here::here("code/functions/functions_simulation_inspection.R"))
-source(here::here("code/functions/functions_simulation_optimized_v1.R"))
-
+#source(here::here("code/functions/functions_simulation_optimized_v1.R"))
+source(here::here("code/functions/functions_simulation_optimized_spnames_v2.R"))
 ```
 
 
