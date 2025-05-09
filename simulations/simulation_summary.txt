@@ -1,1 +1,1 @@
-Number of attempted simulations (successful + failed): 5
+Number of attempted simulations (successful + failed): 2

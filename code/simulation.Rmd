@@ -20,7 +20,7 @@ library(ggraph)
 source(here::here("code/functions/functions_simulation.R")) 
 source(here::here("code/functions/functions_simulation_inspection.R"))
 #source(here::here("code/functions/functions_simulation_optimized_v1.R"))
-source(here::here("code/functions/functions_simulation_optimized_spnames_v2.R"))
+#source(here::here("code/functions/functions_simulation_optimized_spnames_v3.R"))
 ```
 
 
@@ -151,6 +151,9 @@ pars$multiplier = 1 # or also 0.8
 ```
 
 
+```{r}
+pars$beta_ext <- 0.6
+```
 
 
 ### Simulation
@@ -274,11 +277,11 @@ plot_network_at_timestep_stratified <- function(matrix, timestep) {
 timesteps_to_plot <- c(10:20, 30, 40, 50:60, 70, 80, 90:100, 110, 120)
 
 
-list_network <- res_sim$network_crop_list
+list_network_cropped <- res_sim$network_crop_list
 
- list_network_cropped <- lapply(list_network, function(mat) {
-   mat[-c(1:pars$Sbasal), ]  # Remove the first 25 rows
- })
+ # list_network_cropped <- lapply(list_network, function(mat) {
+ #   mat[-c(1:pars$Sbasal), ]  # Remove the first 25 rows
+ # })
 
 # Create plots for the specified timesteps using ggraph with stratified layout
 plot_list <- lapply(timesteps_to_plot, function(timestep) {

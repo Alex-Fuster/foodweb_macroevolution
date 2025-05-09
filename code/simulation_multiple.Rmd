@@ -21,7 +21,7 @@ library(ggraph)
 source(here::here("code/functions/functions_simulation.R")) 
 source(here::here("code/functions/functions_simulation_inspection.R"))
 #source(here::here("code/functions/functions_simulation_optimized_v1.R"))
-source(here::here("code/functions/functions_simulation_optimized_spnames_v2.R"))
+source(here::here("code/functions/function_simulation_7may.R"))
 ```
 
 
@@ -153,7 +153,11 @@ pars$multiplier = 1 # or also 0.8
 
 
 ```{r}
-nsim = 5
+pars$beta_ext <- 0.6
+```
+
+```{r}
+nsim = 2
 ```
 
 
@@ -191,7 +195,7 @@ while (successful_sim < nsim) {
     parameters = pars,
     presence_matrix = simulation$pres,
     traits_df = simulation$traits,
-    extinxction_matrix = simulation$extinct,
+   # extinxction_matrix = simulation$extinct,
     network_list = simulation$L_list,
     network_crop_list = simulation$L_cropped_list,
     anc_dist_table = simulation$dist_anc,

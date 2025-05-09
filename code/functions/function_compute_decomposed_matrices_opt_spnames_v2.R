@@ -183,6 +183,8 @@ compute_decomposed_matrices_roles <- function(results_simulation, int, Smax, nba
   list_svd_prey <- list()
   list_svd_both <- list()
   
+  list_basal_species <- list()
+  
   for (i in seq_along(list_anc_dist)) {
     cat("step", i, "\n")
     
@@ -230,6 +232,11 @@ compute_decomposed_matrices_roles <- function(results_simulation, int, Smax, nba
     list_svd_pred[[i]] <- traits_pred[species_nonbasal, , drop = FALSE]
     list_svd_prey[[i]] <- traits_prey[species_nonbasal, , drop = FALSE]
     list_svd_both[[i]] <- traits_both[species_nonbasal, , drop = FALSE]
+    
+    
+    # Inside the for loop
+    list_basal_species[[i]] <- basal_species
+    
   }
   
   all_anc_dist <- results_simulation$list_anc_dist
@@ -274,6 +281,7 @@ compute_decomposed_matrices_roles <- function(results_simulation, int, Smax, nba
     list_net_present_spp.letters = list_net_present_spp.letters,
     list_phylo.corr_cropped = list_phylo.corr_cropped,
     species_life_summary = species_life_summary,
-    presence_matrix = presence_matrix
+    presence_matrix = presence_matrix,
+    list_basal_species = list_basal_species
   )
 }
