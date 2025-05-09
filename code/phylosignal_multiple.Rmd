@@ -24,7 +24,9 @@ source(here::here("code/functions/function_to_phylo.R"))
 #source(here::here("code/functions/function_compute_decomposed_matrices.R")) # it works for al the phylosign analyses
 
 #source(here::here("code/functions/function_compute_decomposed_matrices.R"))
-source(here::here("code/functions/function_compute_decomposed_matrices_opt_spnames_v2.R"))
+source(here::here("code/functions/function_compute_decomposed_matrices_7may.R"))
+
+source(here::here("code/functions/functions_compute_signal.R"))
 ```
 
 
@@ -353,11 +355,16 @@ ggplot(summary_mantel, aes(x = timestep, y = mean_cor, color = role, fill = role
 ```{r}
 jaccard_results <- map_dfr(seq_along(decomposed_files), function(i) {
   cat("Analyzing simulation", i, "\n")
-  sdv <- readRDS(files[i])
+  sdv <- readRDS(decomposed_files[i])
   df <- compute_jaccard_phylo_correlation(sdv)
-  df$sim <- i
+  
+  if (nrow(df) > 0) {
+    df$sim <- i
+  }
+  
   return(df)
 })
+
 
 ```
 

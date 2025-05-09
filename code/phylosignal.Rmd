@@ -19,7 +19,7 @@ library(ggraph)
 
 source(here::here("code/functions/functions_simulation.R")) 
 source(here::here("code/functions/function_to_phylo.R")) 
-source(here::here("code/functions/function_compute_decomposed_matrices.R"))
+source(here::here("code/functions/function_compute_decomposed_matrices_7may.R"))
 ```
 
 
@@ -27,7 +27,7 @@ Read data
 
 ```{r}
 #res_sim <- readRDS(here::here("output/temporary_output/res_sim.rds"))
-res_sim <- readRDS(here::here("simulations/res_sim_7.rds"))
+res_sim <- readRDS(here::here("simulations/res_sim_1.rds"))
 ```
 
 
@@ -37,7 +37,7 @@ The function *compute_decomposed_matrices()* performs Singular Value Decompositi
 
 
 ```{r}
-sdv_matrices <- compute_decomposed_matrices(results_simulation = res_sim,
+sdv_matrices <- compute_decomposed_matrices_roles(results_simulation = res_sim,
     		                       int = "foodweb",
     		                      Smax = 1000,
     		                      nbasals = 5)
