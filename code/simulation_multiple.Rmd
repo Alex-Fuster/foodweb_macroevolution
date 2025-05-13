@@ -157,13 +157,13 @@ pars$beta_ext <- 0.6
 ```
 
 ```{r}
-nsim = 2
+nsim = 30
 ```
 
 
 
 ```{r}
-output_dir <- "../simulations"
+output_dir <- "../simulations/selection"
 dir.create(output_dir, showWarnings = FALSE)
 
 list_res <- list()

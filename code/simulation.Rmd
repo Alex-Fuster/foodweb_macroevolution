@@ -19,8 +19,8 @@ library(ggraph)
 
 source(here::here("code/functions/functions_simulation.R")) 
 source(here::here("code/functions/functions_simulation_inspection.R"))
-#source(here::here("code/functions/functions_simulation_optimized_v1.R"))
-#source(here::here("code/functions/functions_simulation_optimized_spnames_v3.R"))
+source(here::here("code/functions/function_simulation_7may.R"))
+
 ```
 
 
@@ -274,7 +274,7 @@ plot_network_at_timestep_stratified <- function(matrix, timestep) {
 
 
 # Timesteps to plot
-timesteps_to_plot <- c(10:20, 30, 40, 50:60, 70, 80, 90:100, 110, 120)
+timesteps_to_plot <- c(30, 40, 50:60, 70, 80, 90:100, 110, 120)
 
 
 list_network_cropped <- res_sim$network_crop_list

@@ -273,6 +273,8 @@ sim_model <- function(seed, pars, nsteps) {
                                  0
             )
             
+            
+            
             if (runif(1) < estab_prob) {
               S <- S + 1
               traits_mat[S, ] <- traits_mut2
@@ -357,8 +359,17 @@ sim_model <- function(seed, pars, nsteps) {
         ext_prob_omn[spp_noresources[omnivores]] <- 1
         ext_prob_sel_full[present_non_basal[omnivores]] <- ext_prob_omn
         
-        # --- apply multiplier ---
+        # --- apply multiplier to selection-based probabilities ---
         ext_prob_sel_full[present_non_basal] <- ext_prob_sel_full[present_non_basal] * multiplier
+        
+        # --- blend neutral and selection-based extinction ---
+        # Define neutral extinction probability
+        ext_prob_neutral <- 0.005  
+        
+        # Apply the SN interpolation
+        ext_prob_sel_full[present_non_basal] <- SN * ext_prob_neutral + 
+          (1 - SN) * ext_prob_sel_full[present_non_basal]
+        
         
         # --- apply extinction ---
         random_number <- runif(length(present_non_basal))

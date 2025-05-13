@@ -20,7 +20,7 @@ library(ggraph)
 
 source(here::here("code/functions/functions_simulation.R")) 
 source(here::here("code/functions/function_to_phylo.R"))
-source(here::here("code/functions/function_compute_decomposed_matrices_v3.R"))
+#source(here::here("code/functions/function_compute_decomposed_matrices_v3.R"))
 ```
 
 
@@ -41,18 +41,12 @@ Read data
 
 ```{r}
 res_sim <- readRDS(here::here("output/temporary_output/res_sim.rds"))
+
+sdv_matrices <- readRDS(here::here("decomposed_matrices/sdv_matrices_roles_1.rds"))
+
+sdv_matrices$species_life_summary
 ```
 
-
-
-```{r}
-result_matrices <- compute_result_matrices(results_simulation = res_sim,
-    		                       int = "foodweb",
-    		                      Smax = 1000,
-    		                      nbasals = 5)
-
-result_matrices$species_life_summary
-```
 
 
 
@@ -62,7 +56,7 @@ result_matrices$species_life_summary
 
 ```{r}
 # Extract the table
-df <- result_matrices$species_life_summary
+df <- sdv_matrices$species_life_summary
 
 # Compute longevity
 df$longevity <- with(df, timestep_extinct - timestep_birth + 1)
@@ -79,9 +73,9 @@ df$speciation_rate <- ifelse(!is.na(df$longevity) & df$longevity > 0,
 df$diversification_rate <- with(df, speciation_rate - extinction_rate)
 
 # Store back into the result object (optional)
-result_matrices$species_life_summary <- df
+sdv_matrices$species_life_summary <- df
 
-species_life_summary <- result_matrices$species_life_summary
+species_life_summary <- sdv_matrices$species_life_summary
 
 species_life_summary
 
@@ -99,8 +93,8 @@ species_life_summary
 centrality_data <- list()
 
 # Loop through each timestep's network
-for (i in seq_along(result_matrices$list_net_present_spp.letters)) {
-  mat <- result_matrices$list_net_present_spp.letters[[i]]
+for (i in seq_along(sdv_matrices$list_net_present_spp.letters)) {
+  mat <- sdv_matrices$list_net_present_spp.letters[[i]]
   
   # Skip tiny or empty matrices
   if (nrow(mat) < 2 || sum(mat) == 0) next
@@ -141,7 +135,8 @@ centrality_summary <- aggregate(. ~ spp_letter,
                                 FUN = function(x) if(all(is.na(x))) NA else mean(x, na.rm = TRUE))
 
 # Sort
-centrality_summary <- centrality_summary[order(centrality_summary$spp_letter), ]
+centrality_summary <- centrality_summary[order(centrality_summary$spp_letter), ] |> 
+  rename(spp_name = spp_letter)
 
 ```
 
@@ -152,13 +147,13 @@ centrality_summary <- centrality_summary[order(centrality_summary$spp_letter), ]
 
 ```{r}
 # Merge the species life summary with centrality data
-combined_df <- merge(species_life_summary, centrality_summary, by = "spp_letter", all.x = TRUE)
+combined_df <- merge(species_life_summary, centrality_summary, by = "spp_name", all.x = TRUE)
 
 ```
 
 ```{r}
 plot_df <- combined_df %>%
-  select(spp_letter, extinction_rate, speciation_rate, diversification_rate,
+  select(spp_name, extinction_rate, speciation_rate, diversification_rate,
          degree, eigen, betweenness) %>%
   pivot_longer(cols = c(extinction_rate, speciation_rate, diversification_rate),
                names_to = "rate_type", values_to = "rate_value")
@@ -208,7 +203,7 @@ ggarrange(
 ```{r}
 
 longevity_df <- combined_df %>%
-  select(spp_letter, longevity, degree, eigen, betweenness) %>%
+  select(spp_name, longevity, degree, eigen, betweenness) %>%
   filter(!is.na(longevity) & longevity > 0)
 
 
@@ -248,21 +243,16 @@ ggarrange(
 ## by temporal windows
 
 ```{r}
-presence_matrix <- result_matrices$presence_matrix  # full matrix
-networks_list <- result_matrices$list_net_present_spp.letters
-full_species_life_summary <- result_matrices$species_life_summary
+presence_matrix <- sdv_matrices$presence_matrix  # full matrix
+networks_list <- sdv_matrices$list_net_present_spp.letters
+full_species_life_summary <- sdv_matrices$species_life_summary
 
 ```
 
 
 ```{r}
-library(igraph)
-library(dplyr)
-
-
-
 # Extract presence matrix
-presence_matrix <- result_matrices$presence_matrix
+presence_matrix <- sdv_matrices$presence_matrix
 
 # Define time window size
 window_size <- 20
@@ -300,7 +290,7 @@ for (w in 1:n_windows) {
     betw_cent <- tryCatch(betweenness(g, directed = TRUE), error = function(e) rep(NA, length(sp)))
     
     df <- data.frame(
-      spp_letter = sp,
+      spp_name = sp,
       timestep = i,
       degree = degree_cent,
       eigen = eigen_cent,
@@ -313,22 +303,22 @@ for (w in 1:n_windows) {
   }
   
   centrality_long <- do.call(rbind, centrality_data)
-  centrality_summary <- aggregate(. ~ spp_letter, data = centrality_long[, c("spp_letter", "degree", "eigen", "betweenness")],
+  centrality_summary <- aggregate(. ~ spp_name, data = centrality_long[, c("spp_name", "degree", "eigen", "betweenness")],
                                   FUN = function(x) if (all(is.na(x))) NA else mean(x, na.rm = TRUE))
   
   ## --------- Subset presence matrix to window and compute life metrics ----------
   pres_sub <- presence_matrix[window_range, , drop = FALSE]
-  spp_letters <- colnames(pres_sub)
+  spp_names <- colnames(pres_sub)
   
   spp_life <- data.frame(
-    spp_letter = spp_letters,
+    spp_name = spp_names,
     timestep_birth = NA,
     timestep_extinct = NA,
     stringsAsFactors = FALSE
   )
   
-  for (j in seq_along(spp_letters)) {
-    spp <- spp_letters[j]
+  for (j in seq_along(spp_names)) {
+    spp <- spp_names[j]
     alive_vec <- pres_sub[, spp]
     
     if (any(alive_vec == 1)) {
@@ -341,8 +331,8 @@ for (w in 1:n_windows) {
   spp_life <- spp_life[!is.na(spp_life$longevity) & spp_life$longevity > 0, ]
   
   # Merge with full descendant counts (can’t restrict to window since descent is irreversible)
-  spp_life$n_descendants <- full_species_life_summary$n_descendants[match(spp_life$spp_letter,
-                                                                           full_species_life_summary$spp_letter)]
+  spp_life$n_descendants <- full_species_life_summary$n_descendants[match(spp_life$spp_name,
+                                                                           full_species_life_summary$spp_name)]
   
   # Compute rates
   spp_life$extinction_rate <- 1 / spp_life$longevity
@@ -350,7 +340,7 @@ for (w in 1:n_windows) {
   spp_life$diversification_rate <- spp_life$speciation_rate - spp_life$extinction_rate
   
   # Merge with centralities for this window
-  df_combined <- merge(spp_life, centrality_summary, by = "spp_letter", all.x = TRUE)
+  df_combined <- merge(spp_life, centrality_summary, by = "spp_name", all.x = TRUE)
   
   # Store
   window_results[[paste0("window_", t_start, "_", t_end)]] <- df_combined
@@ -412,7 +402,7 @@ rate_vars <- c("extinction_rate", "speciation_rate", "diversification_rate")
 
 # Prepare clean data
 clean_df <- combined_df %>%
-  select(spp_letter, all_of(rate_vars), eigen) %>%
+  select(spp_name, all_of(rate_vars), eigen) %>%
   drop_na()
 
 

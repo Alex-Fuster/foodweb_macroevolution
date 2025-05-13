@@ -1,0 +1,540 @@
+---
+title: "Phylosignal analysis - multiple simulations"
+---
+
+
+```{r}
+library(ggplot2)
+library(reshape2)
+library(dplyr)
+library(ggpubr)
+library(igraph)
+library(EnvStats)
+library(aricode)
+library(vegan)
+library(ade4)
+library(ape)
+library(tidyr)
+library(ggraph)
+library(purrr)
+
+
+source(here::here("code/functions/functions_simulation.R")) 
+source(here::here("code/functions/function_to_phylo.R")) 
+#source(here::here("code/functions/function_compute_decomposed_matrices.R")) # it works for al the phylosign analyses
+
+#source(here::here("code/functions/function_compute_decomposed_matrices.R"))
+source(here::here("code/functions/function_compute_decomposed_matrices_7may.R"))
+
+source(here::here("code/functions/functions_compute_signal.R"))
+```
+
+
+FUNCTION PROCRUSTES SIGNAL
+
+```{r}
+
+# FUNCTION TO COMPUTE CORRELATION BY CLUSTERS
+
+compute_clustering_metrics <- function(sdv_matrices, results_simulation, Smax = 1000, nbasals = 5) {
+  presence_matrix <- results_simulation$presence_matrix
+  n_steps <- length(results_simulation$network_list)
+
+  # Identify valid timesteps
+  non.valid_timesteps_phylo_distance <- which(rowSums(presence_matrix) < 3)
+  final.discarded_timestep <- ifelse(length(non.valid_timesteps_phylo_distance) > 0,
+                                     max(non.valid_timesteps_phylo_distance) + 1, 1)
+
+  list_anc_dist <- results_simulation$list_anc_dist[(final.discarded_timestep + 1):n_steps]
+  network_list <- results_simulation$network_list[(final.discarded_timestep + 1):n_steps]
+
+  # Species name conversion
+  list_anc_dist_letters <- lapply(list_anc_dist, change_sppnames_letters_ancdist.table)
+  list_networks_sppnames_letters <- sdv_matrices$list_net_present_spp.letters
+
+  presence_matrix <- presence_matrix[(final.discarded_timestep + 1):n_steps, ]
+  colnames(presence_matrix) <- seq(1:Smax)
+  colnames(presence_matrix) <- chartr("0123456789", "ABCDEFGHIJ", colnames(presence_matrix))
+
+  ARI <- numeric()
+  NMI <- numeric()
+  timestep <- numeric()
+
+  for (i in seq_along(list_anc_dist_letters)) {
+    cat("Processing timestep:", i, "\n")
+
+    # Build and prune tree
+    newick <- ToPhylo2(list_anc_dist_letters[[i]])
+    tree <- read.tree(text = sub("A root", ";", paste(newick, "root")))
+    tree$edge.length <- sapply(tree$edge.length, function(x) ifelse(x == 0, 1e-5, x))
+
+    alive_species <- colnames(presence_matrix)[which(presence_matrix[i, ] == 1)]
+    alive_species_filtered <- intersect(alive_species, tree$tip.label)
+    pruned_tree <- keep.tip(tree, alive_species_filtered)
+
+    # Optimal clustering from phylo
+    optim_n <- laplacian_spectral_gap_tree(pruned_tree)$optim_n
+    if (length(optim_n) == 0 || is.null(optim_n) || any(is.na(optim_n)) || optim_n < 2) {
+      ARI[i] <- NA
+      NMI[i] <- NA
+      next
+    }
+
+    phylo_clusters <- spectral_clustering_tree(pruned_tree, optim_n)
+    names(phylo_clusters) <- pruned_tree$tip.label
+
+    # SBM clustering from network
+    interaction_matrix <- list_networks_sppnames_letters[[i]][alive_species_filtered, alive_species_filtered]
+    diag(interaction_matrix) <- 0
+
+    if (sum(interaction_matrix) == 0) {
+      interaction_clusters <- rep(1, length(alive_species_filtered))
+    } else {
+      sbm_fit <- sbm::estimateSimpleSBM(interaction_matrix, model = "bernoulli")
+      interaction_clusters <- sbm_fit$memberships
+    }
+
+    ARI[i] <- compare(interaction_clusters, phylo_clusters, method = "adjusted.rand")
+    NMI[i] <- compare(interaction_clusters, phylo_clusters, method = "nmi")
+    timestep[i] <- i
+  }
+
+  data.frame(timestep = timestep, ARI = ARI, NMI = NMI)
+}
+
+
+
+laplacian_spectral_gap_tree <- function(tree, normalized = FALSE, correlation = TRUE) {
+  # Ensure non-zero branch lengths
+  tree.corr <- tree
+  tree.corr$edge.length <- sapply(tree.corr$edge.length, function(x) ifelse(x == 0, 1e-5, x))
+  
+  # Compute variance-covariance matrix
+  tree.vcv <- vcv(tree.corr, corr = correlation)
+  diag(tree.vcv) <- 0  # Remove self-similarities
+
+  # Compute Laplacian matrix
+  if (normalized) {
+    L <- diag(rep(1, dim(tree.vcv)[1])) - diag(1 / rowSums(tree.vcv)) %*% tree.vcv
+  } else {
+    L <- diag(apply(tree.vcv,1,sum))-tree.vcv
+  }
+
+  # Compute eigenvalues
+  lambdas <- sort(eigen(L)$values)
+  comps <- length(which(lambdas < 1e-12))
+  l <- length(lambdas)
+  
+  # Compute spectral gaps
+  s_gaps <- lambdas[-1] - lambdas[-l]
+  s_util <- s_gaps[-(1:comps)]
+  s_util <- s_util[1:round(l / 4)] #s_util[1:round(l / 2)]
+  opt_n <- which.max(s_util) + comps
+
+  # Plot eigenvalues & spectral gaps
+  # par(mfrow = c(2, 1))
+  # plot(lambdas, xlab = "", ylab = "Lambda", type = "l")
+  # plot(s_gaps, xlab = "", ylab = "Spectral Gap", type = "l")
+
+  return(list("spectral_gaps" = s_gaps, "optim_n" = opt_n))
+}
+
+
+spectral_clustering_tree <- function(tree, nb_cluster, normalized=FALSE, correlation = TRUE) {  
+  # Ensure non-zero branch lengths
+  tree.corr <- tree
+  tree.corr$edge.length <- sapply(tree.corr$edge.length, function(x) ifelse(x == 0, 1e-5, x))
+  
+  # Compute variance-covariance matrix
+  tree.vcv <- vcv(tree.corr, corr = correlation)
+  diag(tree.vcv) <- 0  # Remove self-similarities
+  
+  # Compute Laplacian matrix
+  if (normalized) {
+    L <- diag(rep(1, dim(tree.vcv)[1])) - diag(1 / rowSums(tree.vcv)) %*% tree.vcv
+  } else {
+    L <- diag(rowSums(tree.vcv)) - tree.vcv
+  }
+
+  ## Generates indices of last (smallest) K vectors
+	selected <- rev(1:ncol(L))[1:nb_cluster] 
+	## Extract n normalized eigen-vectors
+	U <- eigen(L)$vectors[, selected, drop = FALSE]  # spectral decomposition
+	U <- sweep(U, 1, sqrt(rowSums(U^2)), '/')    
+	## Perform k-means
+	res <- kmeans(U, nb_cluster, nstart = 40)$cl
+	
+	res
+}
+
+
+
+# COMPUTE CORRELATION WITH JACCARD
+
+compute_jaccard_phylo_correlation <- function(sdv_matrices) {
+  list_network <- sdv_matrices$list_net_present_spp.letters
+  list_corrphylo <- sdv_matrices$list_phylo.corr_cropped
+
+  correlations <- data.frame(
+    timestep = seq_along(list_network),
+    predator = NA_real_,
+    prey = NA_real_,
+    both = NA_real_
+  )
+
+  for (i in seq_along(list_network)) {
+    interaction_matrix <- list_network[[i]]
+    phylo_corr <- list_corrphylo[[i]]
+
+    common_species <- intersect(rownames(interaction_matrix), rownames(phylo_corr))
+    if (length(common_species) < 3) next
+
+    interaction_matrix <- interaction_matrix[common_species, common_species]
+    phylo_corr <- phylo_corr[common_species, common_species]
+
+    jaccard_pred <- 1 - as.matrix(vegdist(t(interaction_matrix), method = "jaccard", binary = TRUE))
+    jaccard_prey <- 1 - as.matrix(vegdist(interaction_matrix, method = "jaccard", binary = TRUE))
+    combined <- cbind(interaction_matrix, t(interaction_matrix))
+    jaccard_both <- 1 - as.matrix(vegdist(combined, method = "jaccard", binary = TRUE))
+
+    upper_tri <- function(mat) mat[upper.tri(mat)]
+
+    correlations$predator[i] <- cor(upper_tri(jaccard_pred), upper_tri(phylo_corr), use = "complete.obs")
+    correlations$prey[i]     <- cor(upper_tri(jaccard_prey), upper_tri(phylo_corr), use = "complete.obs")
+    correlations$both[i]     <- cor(upper_tri(jaccard_both), upper_tri(phylo_corr), use = "complete.obs")
+  }
+
+  return(correlations)
+}
+
+
+```
+
+
+## compute decomposed matrices for each simulation (and save them)
+
+```{r}
+
+#dir.create("decomposed_matrices", showWarnings = FALSE)
+
+files <- list.files("simulations/selection", full.names = TRUE, pattern = "res_sim_\\d+\\.rds")
+
+for (i in seq_along(files)) {
+  
+  cat("analyzing simulation ", i)
+  
+  res_sim <- readRDS(files[i])
+  
+  sdv_matrices <- compute_decomposed_matrices_roles(
+    results_simulation = res_sim,
+    int = "foodweb",
+    Smax = 1000,
+    nbasals = 5
+  )
+  
+  saveRDS(sdv_matrices, file = file.path("decomposed_matrices", paste0("sdv_matrices_roles_", i, ".rds")))
+}
+
+
+```
+
+
+
+# PROCRUSTES
+
+
+```{r}
+
+decomposed_files <- list.files("decomposed_matrices", full.names = TRUE, pattern = "sdv_matrices_roles_\\d+\\.rds")
+
+all_procrustes_results <- list()
+
+for (i in seq_along(decomposed_files)) {
+  cat("Processing decomposed simulation", i, "\n")
+  sdv_matrices <- readRDS(decomposed_files[i])
+  
+  result <- compute_procrustes_signal_roles(sdv_matrices)
+  result$simulation <- i
+  all_procrustes_results[[i]] <- result
+}
+
+df_all_procrustes <- bind_rows(all_procrustes_results)
+
+#saveRDS(df_all_procrustes, here::here("output/df_all_procrustes.rds"))
+df_all_procrustes <- readRDS(here::here("output/df_all_procrustes.rds"))
+
+```
+
+
+```{r}
+summary_df <- df_all_procrustes %>%
+  group_by(role, timestep) %>%
+  summarize(
+    mean_cor = mean(cor, na.rm = TRUE),
+    sd_cor = sd(cor, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+# mean timestep where max. S is reached:
+
+mean_timestep_s60 <- df_all %>%
+  filter(S == 60) %>%
+  summarise(mean_ts = mean(timestep, na.rm = TRUE)) %>%
+  pull(mean_ts)
+
+
+ggplot(summary_df, aes(x = timestep, y = mean_cor, color = role, fill = role)) +
+  geom_line(size = 1) +
+  geom_ribbon(aes(ymin = mean_cor - sd_cor, ymax = mean_cor + sd_cor), alpha = 0.3, color = NA) +
+  geom_vline(xintercept = mean_timestep_s60, linetype = "dashed", color = "black") +
+  labs(
+    x = "Timestep",
+    y = "Procrustes correlation",
+    title = "Procrustes signal: predators vs prey vs both"
+  ) +
+  scale_color_manual(values = c("pred" = "steelblue", "prey" = "tomato", "both" = "darkgreen")) +
+  scale_fill_manual(values = c("pred" = "steelblue", "prey" = "tomato", "both" = "darkgreen")) +
+  theme_minimal() +
+  ylim(0, 1)
+
+
+```
+
+
+```{r}
+# summary_df <- df_all %>%
+#   group_by(role, S) %>%
+#   summarize(
+#     mean_cor = mean(cor, na.rm = TRUE),
+#     sd_cor = sd(cor, na.rm = TRUE),
+#     .groups = "drop"
+#   )
+# 
+# ggplot(summary_df, aes(x = S, y = mean_cor, color = role, fill = role)) +
+#   geom_line(size = 1) +
+#   geom_ribbon(aes(ymin = mean_cor - sd_cor, ymax = mean_cor + sd_cor), alpha = 0.3, color = NA) +
+#   labs(
+#     x = "Timestep",
+#     y = "Procrustes correlation",
+#     title = "Procrustes signal: predators vs prey vs both"
+#   ) +
+#   scale_color_manual(values = c("pred" = "steelblue", "prey" = "tomato", "both" = "darkgreen")) +
+#   scale_fill_manual(values = c("pred" = "steelblue", "prey" = "tomato", "both" = "darkgreen")) +
+#   theme_minimal() +
+#   ylim(0, 1)
+```
+
+
+STORE DATA
+
+```{r}
+
+```
+
+
+
+# MANTEL
+
+
+STORE DATA
+
+```{r}
+decomposed_files <- list.files("decomposed_matrices", full.names = TRUE, pattern = "sdv_matrices_roles_\\d+\\.rds")
+
+all_mantel_results <- list()
+
+for (i in seq_along(decomposed_files)) {
+  cat("Processing decomposed simulation", i, "\n")
+  sdv_matrices <- readRDS(decomposed_files[i])
+  
+  result <- compute_mantel_signal_roles(sdv_matrices)
+  result$simulation <- i
+  all_mantel_results[[i]] <- result
+}
+
+df_mantel <- bind_rows(all_mantel_results)
+
+#saveRDS(df_mantel, here::here("output/df_mantel.rds"))
+
+```
+
+
+
+```{r}
+summary_mantel <- df_mantel %>%
+  group_by(role, timestep) %>%
+  summarize(
+    mean_cor = mean(cor_mantel, na.rm = TRUE),
+    sd_cor = sd(cor_mantel, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+# mean timestep for max. S is reached
+
+mean_timestep_s60 <- df_mantel %>%
+  filter(S == 60) %>%
+  summarise(mean_ts = mean(timestep, na.rm = TRUE)) %>%
+  pull(mean_ts)
+
+
+ggplot(summary_mantel, aes(x = timestep, y = mean_cor, color = role, fill = role)) +
+  geom_line(size = 1) +
+  geom_ribbon(aes(ymin = mean_cor - sd_cor, ymax = mean_cor + sd_cor), alpha = 0.2, color = NA) +
+  geom_vline(xintercept = mean_timestep_s60, linetype = "dashed", color = "black") +
+  labs(
+    x = "Timestep",
+    y = "Mantel correlation",
+    color = "Role",
+    fill = "Role"
+  ) +
+  scale_color_manual(values = c("pred" = "steelblue", "prey" = "tomato", "both" = "darkgreen")) +
+  scale_fill_manual(values = c("pred" = "steelblue", "prey" = "tomato", "both" = "darkgreen")) +
+  theme_minimal() +
+  ylim(0, 1)
+
+```
+
+
+
+# JACCARD
+
+```{r}
+jaccard_results <- map_dfr(seq_along(decomposed_files), function(i) {
+  cat("Analyzing simulation", i, "\n")
+  sdv <- readRDS(decomposed_files[i])
+  df <- compute_jaccard_phylo_correlation(sdv)
+  
+  if (nrow(df) > 0) {
+    df$sim <- i
+  }
+  
+  return(df)
+})
+
+
+#saveRDS(jaccard_results, here::here("output/jaccard_results.rds"))
+
+```
+
+```{r}
+jaccard_long <- pivot_longer(jaccard_results, cols = c(predator, prey, both),
+                              names_to = "type", values_to = "correlation")
+
+jaccard_summary <- jaccard_long %>%
+  filter(!is.na(correlation)) %>%
+  group_by(timestep, type) %>%
+  summarise(mean_cor = mean(abs(correlation), na.rm = TRUE),
+            sd_cor = sd(abs(correlation), na.rm = TRUE),
+            .groups = "drop")
+
+# compute mean timestep where max S is reached
+
+mean_timestep_s60 <- jaccard_results %>%
+  filter(S == 60) %>%
+  summarise(mean_ts = mean(timestep, na.rm = TRUE)) %>%
+  pull(mean_ts)
+
+
+ggplot(jaccard_summary, aes(x = timestep, y = mean_cor, color = type)) +
+  geom_line(size = 1) +
+  geom_ribbon(aes(ymin = mean_cor - sd_cor, ymax = mean_cor + sd_cor, fill = type),
+              alpha = 0.2, color = NA) +
+  geom_vline(xintercept = mean_timestep_s60, linetype = "dashed", color = "black") +
+  labs(
+    x = "Timestep", y = "Mean Pearson correlation"
+  ) +
+  theme_minimal()
+
+
+```
+
+
+
+```{r}
+decomposed_files <- list.files("decomposed_matrices", full.names = TRUE, pattern = "sdv_matrices_roles_\\d+\\.rds")
+
+jaccard_results <- purrr::map_dfr(seq_along(decomposed_files), function(i) {
+  cat("Analyzing simulation", i, "\n")
+  sdv <- readRDS(decomposed_files[i])
+  df <- compute_jaccard_phylo_correlation(sdv)
+  if (nrow(df) > 0) {
+    df$sim <- i
+  }
+  return(df)
+})
+
+```
+
+```{r}
+jaccard_long <- jaccard_results %>%
+  pivot_longer(cols = c(predator, prey, both), names_to = "role", values_to = "correlation") %>%
+  mutate(correlation = abs(correlation))  # <-- TAKE ABSOLUTE VALUE here
+
+summary_jaccard <- jaccard_long %>%
+  group_by(role, timestep) %>%
+  summarize(
+    mean_cor = mean(correlation, na.rm = TRUE),
+    sd_cor = sd(correlation, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+ggplot(summary_jaccard, aes(x = timestep, y = mean_cor, color = role, fill = role)) +
+  geom_line(size = 1) +
+  geom_ribbon(aes(ymin = mean_cor - sd_cor, ymax = mean_cor + sd_cor), alpha = 0.2) +
+  labs(
+    x = "Timestep",
+    y = "Absolute Jaccard-Phylo correlation",
+    color = "Role",
+    fill = "Role"
+  ) +
+  theme_minimal() +
+  ylim(0, 1)  # <-- Now from 0 to 1 because correlations are always positive after abs()
+
+
+```
+
+
+# CLUSTERS
+
+
+```{r}
+decomposed_files <- list.files("../decomposed_matrices", full.names = TRUE, pattern = "sdv_matrices_roles_\\d+\\.rds")
+
+all_cluster_results <- map_dfr(seq_along(decomposed_files), function(i) {
+  cat("Analyzing simulation", i, "\n")
+  sdv <- readRDS(decomposed_files[i])
+  res_sim <- readRDS(list.files("../simulations", full.names = TRUE, pattern = "res_sim_\\d+\\.rds")[i])
+  
+  metrics <- compute_clustering_metrics_roles(sdv_matrices = sdv, results_simulation = res_sim)
+
+  metrics$sim <- i
+  return(metrics)
+})
+
+```
+
+```{r}
+
+summary_cluster <- all_cluster_results %>%
+  group_by(timestep) %>%
+  summarise(
+    mean_ARI = mean(ARI, na.rm = TRUE),
+    sd_ARI = sd(ARI, na.rm = TRUE),
+    mean_NMI = mean(NMI, na.rm = TRUE),
+    sd_NMI = sd(NMI, na.rm = TRUE)
+  )
+
+ggplot(summary_cluster, aes(x = timestep)) +
+  geom_ribbon(aes(ymin = mean_ARI - sd_ARI, ymax = mean_ARI + sd_ARI), fill = "blue", alpha = 0.2) +
+  geom_line(aes(y = mean_ARI), color = "blue", size = 1) +
+  geom_ribbon(aes(ymin = mean_NMI - sd_NMI, ymax = mean_NMI + sd_NMI), fill = "red", alpha = 0.2) +
+  geom_line(aes(y = mean_NMI), color = "red", size = 1) +
+  labs(x = "Timestep", y = "Clustering similarity", title = "Mean ARI and NMI with variance") +
+  theme_minimal()
+
+```
+
+
+
+
+

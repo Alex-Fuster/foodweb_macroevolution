@@ -1,1 +1,0 @@
-Number of attempted simulations (successful + failed): 2

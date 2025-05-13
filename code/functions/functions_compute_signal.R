@@ -26,7 +26,7 @@ compute_procrustes_signal_roles <- function(sdv_matrices, threshold = 0.8) {
     d_network <- vector()
     
     for (i in seq_along(trait_list)) {
-      cat("  step", i, "\n")
+    #  cat("  step", i, "\n")
       
       traits_i <- trait_list[[i]]
       
@@ -120,7 +120,7 @@ compute_mantel_signal_roles <- function(sdv_matrices, threshold = 0.8) {
     d_network <- vector()
     
     for (i in seq_along(trait_list)) {
-      cat("  step", i, "\n")
+    #  cat("  step", i, "\n")
       
       traits_i <- trait_list[[i]]
       
@@ -201,7 +201,7 @@ compute_jaccard_phylo_correlation <- function(sdv_matrices) {
   results <- list()
   
   for (i in seq_along(list_network)) {
-    cat("Processing step", i, "\n")
+    #cat("Processing step", i, "\n")
     
     interaction_matrix <- list_network[[i]]
     phylo_corr <- list_corrphylo[[i]]
@@ -238,6 +238,7 @@ compute_jaccard_phylo_correlation <- function(sdv_matrices) {
     # Compute Spearman correlations
     df_step <- data.frame(
       timestep = i,
+      S = length(common_species),
       predator = suppressWarnings(cor(pred_vec, phylo_vec, use = "complete.obs", method = "spearman")),
       prey = suppressWarnings(cor(prey_vec, phylo_vec, use = "complete.obs", method = "spearman")),
       both = suppressWarnings(cor(both_vec, phylo_vec, use = "complete.obs", method = "spearman"))

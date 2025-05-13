@@ -291,22 +291,22 @@ compute_decomposed_matrices_roles <- function(results_simulation, int, Smax, nba
   list_valid_timesteps <- c()  # <- store valid indices
   
   for (i in seq_along(list_anc_dist_all)) {
-    cat("Step", i, "- rows in anc_dist:", if (!is.null(list_anc_dist_all[[i]])) nrow(list_anc_dist_all[[i]]) else "NULL", "\n")
+    #cat("Step", i, "- rows in anc_dist:", if (!is.null(list_anc_dist_all[[i]])) nrow(list_anc_dist_all[[i]]) else "NULL", "\n")
     
     if (is.null(list_anc_dist_all[[i]]) || nrow(list_anc_dist_all[[i]]) < 2) {
-      cat("Skipping step", i, "- missing or too few ancestors\n")
+     # cat("Skipping step", i, "- missing or too few ancestors\n")
       next
     }
     
     network_alive <- network_crop_list[[i]]
     if (is.null(network_alive) || nrow(network_alive) < 2 || ncol(network_alive) < 2) {
-      cat("Skipping step", i, "- invalid cropped network\n")
+     # cat("Skipping step", i, "- invalid cropped network\n")
       next
     }
     
     alive_species <- names(which(presence_matrix[i, ] == 1))
     if (length(alive_species) < 2) {
-      cat("Skipping step", i, "- too few alive species\n")
+    #  cat("Skipping step", i, "- too few alive species\n")
       next
     }
     
@@ -333,13 +333,16 @@ compute_decomposed_matrices_roles <- function(results_simulation, int, Smax, nba
     list_net_present_spp.letters[[length(list_valid_timesteps)]] <- network_alive_cropped
     
     svd_result <- svd(network_alive_cropped)
-    U <- svd_result$u
-    V <- svd_result$v
-    Ssqrt <- diag(sqrt(svd_result$d))
+    k <- length(svd_result$d)
     
-    traits_pred <- U %*% Ssqrt
-    traits_prey <- V %*% Ssqrt
+    U_k <- svd_result$u[, 1:k, drop = FALSE]
+    V_k <- svd_result$v[, 1:k, drop = FALSE]
+    Ssqrt <- diag(sqrt(svd_result$d[1:k]))
+    
+    traits_pred <- U_k %*% Ssqrt
+    traits_prey <- V_k %*% Ssqrt
     traits_both <- (traits_pred + traits_prey) / 2
+    
     
     rownames(traits_pred) <- rownames(network_alive_cropped)
     rownames(traits_prey) <- rownames(network_alive_cropped)
