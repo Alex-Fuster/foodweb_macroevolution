@@ -1,0 +1,2 @@
+pars_16May.rds -> I get full networks with many top predaors, from beggining to end. 
+                  But the niche space is quite small (from 0 to 0.5)

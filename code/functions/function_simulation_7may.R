@@ -364,7 +364,7 @@ sim_model <- function(seed, pars, nsteps) {
         
         # --- blend neutral and selection-based extinction ---
         # Define neutral extinction probability
-        ext_prob_neutral <- 0.005  
+       # ext_prob_neutral <- 0.005  
         
         # Apply the SN interpolation
         ext_prob_sel_full[present_non_basal] <- SN * ext_prob_neutral + 

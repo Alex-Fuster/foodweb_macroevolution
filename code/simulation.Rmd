@@ -156,6 +156,96 @@ pars$beta_ext <- 0.6
 ```
 
 
+```{r}
+#saveRDS(pars, here::here("code/simulation_pars/pars_16May.rds"))
+```
+
+
+Making selection-based scenario more pronounced
+
+```{r}
+pars$u_0pos <- 0.2
+pars$u_1pos <- 1.2
+pars$a_upos <- 0.3
+pars$e_0neg <- 0.03
+pars$e_1neg <- 0.15
+pars$a_eneg <- 0.6
+pars$competition_coefficient <- 0.025
+pars$ext_prob_neutral <- 0.0002
+pars$beta_ext <- 0.5
+
+#saveRDS(pars, "simulation_pars/pars_selection_17May.rds")
+```
+
+
+```{r}
+pars$u_0pos <- 0.2
+pars$u_1pos <- 1.2
+pars$a_upos <- 0.3
+pars$e_0neg <- 0.1#0.1
+pars$e_1neg <- 0.3#0.6
+pars$a_eneg <- 0.6#0.2
+pars$competition_coefficient <- 0.2#0.2
+pars$ext_prob_neutral <- 0.0002
+pars$beta_ext <- 0.5
+#pars$multiplier<- 2
+
+#saveRDS(pars, "simulation_pars/pars_selection_20May.rds")
+```
+
+
+Trying to increase niche space
+
+```{r}
+pars$sd <- 0.15              # More trait exploration
+# pars$a_upos <- 0.1           # Less steep establishment penalty
+# pars$e_1neg <- 0.1           # Less top-down extinction pressure
+# pars$competition_coefficient <- 0.1  # Less extinction from similarity
+
+#pars$beta_ext <- 0.4
+
+```
+
+
+Tryng to slow S builtup speed
+
+```{r}
+# upper limit of speciation probability
+# pars$u_max <- 0.2  # from 0.23 
+# 
+# # steepness of decline in speciation with diversity
+# 
+# pars$d <- 0.6  # from 0.5
+# 
+# pars$u_0pos <- 0.2
+# pars$u_1pos <- 1.2
+# pars$a_upos <- 0.3
+# pars$e_0neg <- 0.05#0.1
+# pars$e_1neg <- 0.1#0.6
+# pars$a_eneg <- 0.2#0.2
+# pars$competition_coefficient <- 0.1#0.2
+
+```
+
+
+Neutral
+
+```{r}
+# pars$SN = 1
+# pars$ext_prob_neutral = 0.05
+# pars$estab_prob_neutral = 0.5
+```
+
+```{r}
+nsteps =  150
+```
+
+
+```{r}
+#saveRDS(pars, "simulation_pars/pars_selection_20May.rds")
+```
+
+
 ### Simulation
 
 
@@ -204,6 +294,28 @@ while (successful_sim < nsim) {
 }
 
 
+
+```
+
+
+```{r}
+# Convert the list to a data.frame
+ext_df <- do.call(rbind, lapply(seq_along(simulation$ext_prob_log), function(i) {
+  data.frame(
+    timestep = i * 20,
+    ext_prob = simulation$ext_prob_log[[i]]
+  )
+}))
+
+ggplot(ext_df, aes(x = ext_prob)) +
+  geom_histogram(bins = 30, fill = "steelblue", color = "white") +
+  facet_wrap(~ timestep, scales = "free_y") +
+  labs(
+    x = "Extinction probability (selection component)",
+    y = "Count",
+    title = "Extinction probability distribution across timesteps"
+  ) +
+  theme_minimal()
 
 ```
 
@@ -274,7 +386,7 @@ plot_network_at_timestep_stratified <- function(matrix, timestep) {
 
 
 # Timesteps to plot
-timesteps_to_plot <- c(30, 40, 50:60, 70, 80, 90:100, 110, 120)
+timesteps_to_plot <- c(20, 30, 40, 50:60, 70, 80, 90:100, 110, 120)
 
 
 list_network_cropped <- res_sim$network_crop_list

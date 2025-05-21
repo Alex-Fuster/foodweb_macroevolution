@@ -321,13 +321,26 @@ compute_clustering_metrics_roles <- function(sdv_matrices, results_simulation, S
       next
     }
     
-    sbm_fit <- tryCatch(
-      sbm::estimateSimpleSBM(interaction_matrix, model = "bernoulli"),
-      error = function(e) NULL
-    )
+    # sbm_fit <- tryCatch(
+    #   sbm::estimateSimpleSBM(interaction_matrix, model = "bernoulli"),
+    #   error = function(e) NULL
+    # )
     
-    if (is.null(sbm_fit)) {
-      cat("Warning: SBM fitting failed at step", i, "- skipping\n")
+    sbm_fit <- tryCatch({
+      suppressMessages(
+        suppressWarnings({
+          capture.output(
+            model <- sbm::estimateSimpleSBM(interaction_matrix, model = "bernoulli"),
+            file = NULL
+          )
+          model  # return the model object, not the output
+        })
+      )
+    }, error = function(e) NULL)
+    
+    
+    if (is.null(sbm_fit) || !("memberships" %in% names(sbm_fit))) {
+      # Optional: if (!quiet) cat("Warning: SBM fitting failed or invalid object at step", i, "- skipping\n")
       ARI[i] <- NA
       NMI[i] <- NA
       timestep[i] <- i
@@ -335,6 +348,7 @@ compute_clustering_metrics_roles <- function(sdv_matrices, results_simulation, S
     }
     
     interaction_clusters <- sbm_fit$memberships
+    
     names(interaction_clusters) <- rownames(interaction_matrix)
     
     # Match species, remove basals
