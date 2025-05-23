@@ -211,7 +211,7 @@ Tryng to slow S builtup speed
 
 ```{r}
 # upper limit of speciation probability
-# pars$u_max <- 0.2  # from 0.23 
+ pars$u_max <- 0.2  # from 0.23 
 # 
 # # steepness of decline in speciation with diversity
 # 
@@ -231,13 +231,13 @@ Tryng to slow S builtup speed
 Neutral
 
 ```{r}
-# pars$SN = 1
-# pars$ext_prob_neutral = 0.05
-# pars$estab_prob_neutral = 0.5
+ pars$SN = 1
+ pars$ext_prob_neutral = 0.05
+ pars$estab_prob_neutral = 0.5
 ```
 
 ```{r}
-nsteps =  150
+nsteps =  200
 ```
 
 
@@ -324,7 +324,7 @@ ggplot(ext_df, aes(x = ext_prob)) +
 ```{r}
 #saveRDS(res_sim, here::here("output/temporary_output/res_sim.rds"))
 
-# res_sim <- readRDS(here::here("output/testing/res_sim.rds"))
+ res_sim <- readRDS(here::here("simulations/selection/test/res_sim_8.rds"))
 
 
 ```

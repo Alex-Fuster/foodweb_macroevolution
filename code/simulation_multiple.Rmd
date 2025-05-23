@@ -174,7 +174,16 @@ load parameters
 
 ```{r}
 pars <- readRDS("simulation_pars/pars_selection_17May.rds")
-nsteps =  150
+nsteps =  200
+```
+
+
+```{r}
+# a bit more of trait space 
+pars$sd <- 0.15
+
+# slowing down S buildup
+pars$u_max <- 0.2 
 ```
 
 
@@ -182,15 +191,15 @@ Selection-neutral
 
 ```{r}
 # STRENGTH OF NEUTRAL-DRIVEN EVOLUTION
-pars$SN = 1 # strength for neutral-driven evolution
-
-pars$ext_prob_neutral = 0.05
-pars$estab_prob_neutral = 0.5
+# pars$SN = 1 # strength for neutral-driven evolution
+# 
+# pars$ext_prob_neutral = 0.05
+# pars$estab_prob_neutral = 0.5
 ```
 
 
 ```{r}
-nsim = 10
+nsim = 25
 ```
 
 
@@ -198,7 +207,7 @@ nsim = 10
 
 
 ```{r}
-output_dir <- "../simulations/neutral/test"
+output_dir <- "../simulations/selection"
 dir.create(output_dir, showWarnings = FALSE)
 
 list_res <- list()
@@ -212,6 +221,7 @@ while (successful_sim < nsim) {
   if (seed %in% seed_list) next
   seed_list <- c(seed_list, seed)
 
+  total_nb_sim <- total_nb_sim + 1  
   cat("Trying seed:", seed, "\n")
   simulation <- sim_model(seed = seed, pars = pars, nsteps = nsteps)
 
@@ -221,7 +231,6 @@ while (successful_sim < nsim) {
   }
 
   successful_sim <- successful_sim + 1
-  total_nb_sim <- total_nb_sim + 1
   seed_record[successful_sim] <- seed
 
   res_sim <- list(
@@ -237,7 +246,7 @@ while (successful_sim < nsim) {
     list_anc_dist = simulation$list_dist_anc
   )
 
-  saveRDS(res_sim, file = file.path(output_dir, paste0("res_sim_", successful_sim, ".rds")))
+  saveRDS(res_sim, file = file.path(output_dir, paste0("res_sim_", successful_sim+75, ".rds")))
   cat("✅ Stored simulation", successful_sim, "of", nsim, "\n")
 }
 

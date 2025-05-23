@@ -423,7 +423,8 @@ compute_decomposed_matrices_roles <- function(results_simulation, int, Smax, nba
     list_net_present_spp.letters = list_net_present_spp.letters,
     list_phylo.corr_cropped = list_phylo.corr_cropped,
     species_life_summary = species_life_summary,
-    presence_matrix = presence_matrix_filtered
+    presence_matrix = presence_matrix_filtered,
+    list_valid_timesteps = list_valid_timesteps
   )
 }
 
