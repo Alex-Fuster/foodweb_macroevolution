@@ -199,7 +199,7 @@ Selection-neutral
 
 
 ```{r}
-nsim = 25
+nsim = 10
 ```
 
 
@@ -207,7 +207,7 @@ nsim = 25
 
 
 ```{r}
-output_dir <- "../simulations/selection"
+output_dir <- "../simulations/neutral"
 dir.create(output_dir, showWarnings = FALSE)
 
 list_res <- list()
@@ -246,7 +246,7 @@ while (successful_sim < nsim) {
     list_anc_dist = simulation$list_dist_anc
   )
 
-  saveRDS(res_sim, file = file.path(output_dir, paste0("res_sim_", successful_sim+75, ".rds")))
+  saveRDS(res_sim, file = file.path(output_dir, paste0("res_sim_", successful_sim, ".rds")))
   cat("✅ Stored simulation", successful_sim, "of", nsim, "\n")
 }
 
